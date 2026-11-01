@@ -338,6 +338,13 @@ class ViewTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Таблица лидеров')
 
+    def test_practice_page_ok(self):
+        self.lesson.quiz_md = QUIZ_SAMPLE
+        self.lesson.save()
+        r = self.client.get(reverse('practice'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Тренажёр вопросов')
+
     def test_profile_ok(self):
         self.client.login(username='stud', password='pass12345')
         r = self.client.get(reverse('profile'))

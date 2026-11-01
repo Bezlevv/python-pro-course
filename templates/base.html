@@ -25,6 +25,7 @@
         <a class="nav-link" href="{% url 'modules' %}">Курс</a>
         <a class="nav-link" href="{% url 'search' %}">Поиск</a>
         <a class="nav-link" href="{% url 'reference' %}">Справочник</a>
+        <a class="nav-link" href="{% url 'practice' %}">Тренажёр</a>
         <a class="nav-link" href="{% url 'leaderboard' %}">Лидеры</a>
         {% if user.is_authenticated %}
           <a class="nav-link" href="{% url 'profile' %}">Мой прогресс</a>

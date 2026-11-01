@@ -230,4 +230,60 @@
       });
     });
   }
+  /* --- Тренажёр вопросов --- */
+  var practiceDataEl = document.getElementById('practiceData');
+  if (practiceDataEl) {
+    var practiceQuestions = JSON.parse(practiceDataEl.textContent || '[]');
+    var practiceContainer = document.getElementById('practiceQuestions');
+    practiceQuestions.forEach(function (q, i) {
+      var div = document.createElement('div');
+      div.className = 'quiz-question';
+      var text = document.createElement('div');
+      text.className = 'quiz-q-text';
+      text.textContent = (i + 1) + '. ' + q.question;
+      div.appendChild(text);
+      q.options.forEach(function (opt, oi) {
+        var label = document.createElement('label');
+        label.className = 'quiz-option';
+        var input = document.createElement('input');
+        input.type = 'radio'; input.name = 'pq' + i; input.value = oi;
+        var span = document.createElement('span');
+        span.textContent = opt;
+        label.appendChild(input); label.appendChild(span);
+        div.appendChild(label);
+      });
+      var fb = document.createElement('div');
+      fb.className = 'quiz-feedback';
+      div.appendChild(fb);
+      practiceContainer.appendChild(div);
+    });
+
+    var practiceBtn = document.getElementById('practiceCheck');
+    if (practiceBtn) {
+      practiceBtn.addEventListener('click', function () {
+        var score = 0;
+        practiceQuestions.forEach(function (q, i) {
+          var group = practiceContainer.children[i];
+          if (!group) return;
+          var checked = group.querySelector('input:checked');
+          var ok = checked && parseInt(checked.value, 10) === q.correct_index;
+          if (ok) score++;
+          group.classList.toggle('correct', ok);
+          group.classList.toggle('incorrect', !ok);
+          var fb = group.querySelector('.quiz-feedback');
+          if (ok) {
+            fb.className = 'quiz-feedback ok';
+            fb.textContent = '✓ Верно! ' + (q.explanation || '');
+          } else {
+            fb.className = 'quiz-feedback bad';
+            var opts = group.querySelectorAll('input');
+            if (opts[q.correct_index]) opts[q.correct_index].checked = true;
+            fb.textContent = '✗ Неверно. ' + (q.explanation || '');
+          }
+        });
+        var scoreEl = document.getElementById('practiceScore');
+        if (scoreEl) scoreEl.textContent = 'Результат: ' + score + ' из ' + practiceQuestions.length;
+      });
+    }
+  }
 })();

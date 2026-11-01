@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Тренажёр вопросов — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>🧠 Тренажёр вопросов</h1>
+    <p class="lead muted">10 случайных вопросов из всего курса. Отвечай и проверяй себя — отличная подготовка к экзаменам.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="card" style="padding: 24px;">
+      <div id="practiceQuestions" class="quiz-block"></div>
+      <div class="quiz-actions">
+        <button type="button" class="btn btn-primary" id="practiceCheck">Проверить ответы</button>
+        <button type="button" class="btn btn-ghost" id="practiceReload" onclick="location.reload()">🔄 Другие вопросы</button>
+        <span id="practiceScore" class="quiz-score"></span>
+      </div>
+    </div>
+    <script type="application/json" id="practiceData">{{ questions_json|safe }}</script>
+  </div>
+</section>
+{% endblock %}

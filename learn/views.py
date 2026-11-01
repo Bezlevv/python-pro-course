@@ -20,6 +20,7 @@ from .models import (
     LessonNote,
     LessonProgress,
     Module,
+    QuizQuestion,
     UserAchievement,
 )
 from .utils import (
@@ -501,6 +502,21 @@ def profile(request):
 def reference(request):
     """Страница «Справочник»: шпаргалки и глоссарий."""
     return render(request, 'reference.html')
+
+
+def practice(request):
+    """Тренажёр: случайные вопросы из курса."""
+    questions = list(QuizQuestion.objects.exclude(lesson__is_exam=True).order_by('?')[:10])
+    payload = [{
+        'id': q.id,
+        'question': q.question,
+        'options': q.options,
+        'correct_index': q.correct_index,
+        'explanation': q.explanation,
+    } for q in questions]
+    return render(request, 'practice.html', {
+        'questions_json': json.dumps(payload, ensure_ascii=False),
+    })
 
 
 def leaderboard(request):
