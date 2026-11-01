@@ -314,6 +314,32 @@ def _sandbox_violations(code):
 
 def run_python_code(code, stdin_data='', timeout=SANDBOX_TIMEOUT):
     """Запускает код в песочнице, возвращает dict с результатом."""
+    return _run_python_code(code, stdin_data, timeout)
+
+
+def check_style(code):
+    """Проверка стиля через ruff. Возвращает список замечаний."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-m', 'ruff', 'check', '--select', 'E,W,F,I',
+             '--stdin-filename', 'main.py', '-'],
+            input=code, capture_output=True, text=True, encoding='utf-8',
+            timeout=10,
+        )
+    except Exception:
+        return []
+    lines = (proc.stdout or '').splitlines()
+    out = []
+    for line in lines:
+        m = re.search(r':(\d+):(\d+):\s+(\S+)\s+(.*)$', line)
+        if m:
+            out.append(f'строка {m.group(1)}, колонка {m.group(2)}: {m.group(3)} — {m.group(4)}')
+        elif line.strip():
+            out.append(line.strip())
+    return out[:8]
+
+
+def _run_python_code(code, stdin_data, timeout):
     violations = _sandbox_violations(code)
     if violations:
         return {'ok': False, 'output': '', 'error': 'Запрещено в песочнице: ' + ', '.join(violations)}

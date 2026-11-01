@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import Lesson, LessonProgress, Module, QuizQuestion
-from .utils import build_lesson_tasks, parse_quiz, run_python_code, split_test_cases
+from .utils import build_lesson_tasks, check_style, parse_quiz, run_python_code, split_test_cases
 from .management.commands.ensure_admin import ensure_superuser
 from .views import level_info, xp_for_user
 
@@ -84,6 +84,9 @@ class SandboxTests(TestCase):
     def test_syntax_error_reported(self):
         result = run_python_code('print("незакрытая строка)')
         self.assertFalse(result['ok'])
+
+    def test_check_style_returns_list(self):
+        self.assertIsInstance(check_style('import os\nx=1\n'), list)
 
 
 class ModelsTests(TestCase):
@@ -338,12 +341,27 @@ class ViewTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Таблица лидеров')
 
+    def test_challenge_ok(self):
+        r = self.client.get(reverse('challenge'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Задание недели')
+
+    def test_goals_ok(self):
+        self.client.login(username='stud', password='pass12345')
+        r = self.client.post(reverse('goals'), {'goal': 'backend'})
+        self.assertEqual(r.status_code, 302)
+        r = self.client.get(reverse('goals'))
+        self.assertEqual(r.status_code, 200)
+
     def test_practice_page_ok(self):
         self.lesson.quiz_md = QUIZ_SAMPLE
         self.lesson.save()
         r = self.client.get(reverse('practice'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Тренажёр вопросов')
+        r = self.client.get(reverse('practice') + '?mode=interview')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Режим собеседования')
 
     def test_profile_ok(self):
         self.client.login(username='stud', password='pass12345')

@@ -286,4 +286,88 @@
       });
     }
   }
+  /* --- Режим собеседования --- */
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('mode') !== 'interview') return;
+    var dataEl = document.getElementById('practiceData');
+    if (!dataEl) return;
+    var questions = JSON.parse(dataEl.textContent || '[]');
+    var total = questions.length;
+    var idx = 0;
+    var score = 0;
+    var timer = null;
+    var secondsLeft = 60;
+
+    var wrap = document.getElementById('practiceQuestions');
+    var checkBtn = document.getElementById('practiceCheck');
+    var scoreEl = document.getElementById('practiceScore');
+    var bar = document.querySelector('.interview-bar');
+    var timerEl = document.createElement('span');
+    timerEl.className = 'interview-timer';
+    if (bar) bar.appendChild(timerEl);
+    var progressEl = document.getElementById('interviewProgress');
+    checkBtn.textContent = 'Ответить';
+
+    function showQuestion() {
+      clearInterval(timer);
+      if (idx >= total) { finish(); return; }
+      Array.from(wrap.children).forEach(function (q, i) {
+        q.style.display = (i === idx) ? '' : 'none';
+      });
+      if (progressEl) progressEl.textContent = 'Вопрос ' + (idx + 1) + ' из ' + total;
+      secondsLeft = 60;
+      timerEl.textContent = secondsLeft + 'с';
+      timerEl.classList.remove('hot');
+      timer = setInterval(function () {
+        secondsLeft--;
+        timerEl.textContent = secondsLeft + 'с';
+        timerEl.classList.toggle('hot', secondsLeft <= 5);
+        if (secondsLeft <= 0) {
+          clearInterval(timer);
+          answerCurrent();
+        }
+      }, 1000);
+    }
+
+    function answerCurrent() {
+      clearInterval(timer);
+      var group = wrap.children[idx];
+      if (!group) return;
+      var checked = group.querySelector('input:checked');
+      var ok = checked && parseInt(checked.value, 10) === questions[idx].correct_index;
+      if (ok) score++;
+      group.classList.toggle('correct', ok);
+      group.classList.toggle('incorrect', !ok);
+      var fb = group.querySelector('.quiz-feedback');
+      if (ok) {
+        fb.className = 'quiz-feedback ok';
+        fb.textContent = '✓ Верно! ' + (questions[idx].explanation || '');
+      } else {
+        fb.className = 'quiz-feedback bad';
+        var opts = group.querySelectorAll('input');
+        if (opts[questions[idx].correct_index]) opts[questions[idx].correct_index].checked = true;
+        fb.textContent = '✗ Неверно. ' + (questions[idx].explanation || '');
+      }
+      if (scoreEl) scoreEl.textContent = score + ' из ' + (idx + 1);
+      setTimeout(function () {
+        idx++;
+        showQuestion();
+      }, 1400);
+    }
+
+    function finish() {
+      clearInterval(timer);
+      var pct = Math.round(score / total * 100);
+      var verdict = pct >= 80 ? 'Отличный результат! 💪' : (pct >= 60 ? 'Неплохо, но можно лучше.' : 'Стоит повторить материал.');
+      wrap.innerHTML = '<div class="interview-final">' + verdict + '</div>' +
+        '<div class="quiz-score" style="margin-top:8px">Результат: ' + score + ' из ' + total + ' (' + pct + '%)</div>';
+      checkBtn.style.display = 'none';
+      if (timerEl) timerEl.textContent = '';
+      if (progressEl) progressEl.textContent = 'Собеседование завершено';
+    }
+
+    checkBtn.addEventListener('click', answerCurrent);
+    showQuestion();
+  })();
 })();

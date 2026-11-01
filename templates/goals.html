@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Мои цели — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>🎯 Мои цели</h1>
+    <p class="lead muted">Выбери роль — курс покажет рекомендуемую дорожную карту и прогресс по ней.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <form method="post" class="search-form">
+      {% csrf_token %}
+      <select name="goal" class="filter-select">
+        <option value="">— выбери цель —</option>
+        {% for key, slugs in goals.items %}
+          <option value="{{ key }}" {% if goal == key %}selected{% endif %}>
+            {% if key == 'backend' %}Бэкенд-разработчик{% elif key == 'data' %}Аналитик данных{% elif key == 'ml' %}ML-инженер{% elif key == 'games' %}Разработчик игр/GUI{% elif key == 'senior' %}Senior-разработчик (всё){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" type="submit">Сохранить</button>
+    </form>
+
+    {% if data %}
+      <div class="section-head" style="margin-top: 32px;">
+        <h2>Рекомендуемый путь</h2>
+        <p class="muted">Иди по порядку — прогресс по каждому модулю показан.</p>
+      </div>
+      <div class="profile-modules">
+        {% for item in data %}
+          <div class="card profile-module">
+            <div class="profile-module-head">
+              <span class="module-icon">{{ item.module.icon }}</span>
+              <div>
+                <div class="profile-module-title"><a href="{{ item.module.get_absolute_url }}">{{ item.module.title }}</a></div>
+                <div class="muted">{{ item.done }} из {{ item.total }} уроков</div>
+              </div>
+              <b class="profile-module-pct">{{ item.pct }}%</b>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width: {{ item.pct }}%"></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% elif goal is None %}
+      <p class="muted" style="margin-top: 28px;">Пока цель не выбрана. Выбери роль выше — и я покажу план.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

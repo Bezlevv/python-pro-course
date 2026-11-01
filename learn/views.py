@@ -25,6 +25,7 @@ from .models import (
 )
 from .utils import (
     build_lesson_tasks,
+    check_style,
     lesson_difficulty_label,
     normalize_output,
     render_markdown,
@@ -322,6 +323,7 @@ def run_code(request, lesson_id):
         user=request.user, lesson=lesson, code=code,
         output=result.get('output', ''), passed=result.get('passed'),
     )
+    result['style'] = check_style(code)
     return JsonResponse(result)
 
 
@@ -504,9 +506,63 @@ def reference(request):
     return render(request, 'reference.html')
 
 
+def challenge(request):
+    """Задание недели: детерминированный выбор урока по номеру недели."""
+    from datetime import date
+    from random import Random
+    iso = date.today().isocalendar()
+    seed = iso[0] * 1000 + iso[1]
+    lessons = list(Lesson.objects.exclude(is_exam=True).order_by('module__order', 'order'))
+    if not lessons:
+        return redirect('modules')
+    lesson = lessons[Random(seed).randrange(len(lessons))]
+    ctx = _lesson_ctx(request, lesson)
+    ctx['week_label'] = f'{iso[1]}-я неделя {iso[0]} года'
+    return render(request, 'challenge.html', ctx)
+
+
+GOALS_MAP = {
+    'backend': ['01-basics', '02-advanced', '03-stdlib', '05-web', '13-databases', '22-drf', '10-deploy'],
+    'data': ['01-basics', '02-advanced', '04-data', '11-algorithms', '25-mlops', '16-ai'],
+    'ml': ['01-basics', '04-data', '06-neural', '11-algorithms', '25-mlops', '16-ai'],
+    'games': ['01-basics', '02-advanced', '26-games', '27-pyqt', '31-frontend'],
+    'senior': [m.slug for m in Module.objects.all().order_by('order')],
+}
+
+
+@login_required
+def goals(request):
+    """Экран целей: выбор роли и дорожная карта."""
+    if request.method == 'POST':
+        goal = request.POST.get('goal', '')
+        request.session['goal'] = goal if goal in GOALS_MAP else None
+        return redirect('goals')
+    goal = request.session.get('goal')
+    data = []
+    if goal in GOALS_MAP:
+        progress = _module_progress(request.user)
+        for slug in GOALS_MAP[goal]:
+            module = Module.objects.filter(slug=slug).first()
+            if not module:
+                continue
+            lessons = list(module.lessons.exclude(is_exam=True))
+            total = len(lessons)
+            done = progress.get(module.id, 0)
+            data.append({
+                'module': module,
+                'total': total,
+                'done': done,
+                'pct': round(done / total * 100) if total else 0,
+            })
+    return render(request, 'goals.html', {'goals': dict((k, v) for k, v in GOALS_MAP.items()), 'goal': goal if goal in GOALS_MAP else None, 'data': data})
+
+
 def practice(request):
-    """Тренажёр: случайные вопросы из курса."""
-    questions = list(QuizQuestion.objects.exclude(lesson__is_exam=True).order_by('?')[:10])
+    """Тренажёр / режим собеседования: случайные вопросы из курса."""
+    mode = request.GET.get('mode', '')
+    interview = mode == 'interview'
+    limit = 15 if interview else 10
+    questions = list(QuizQuestion.objects.exclude(lesson__is_exam=True).order_by('?')[:limit])
     payload = [{
         'id': q.id,
         'question': q.question,
@@ -516,6 +572,8 @@ def practice(request):
     } for q in questions]
     return render(request, 'practice.html', {
         'questions_json': json.dumps(payload, ensure_ascii=False),
+        'mode': mode,
+        'interview': interview,
     })
 
 

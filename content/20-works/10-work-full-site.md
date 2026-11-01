@@ -179,7 +179,7 @@ def test_login_success(client):
     client.post("/register", data={"username": "anya", "email": "a@test.ru", "password": "qwerty"})
     r = client.post("/login", data={"username": "anya", "password": "qwerty"})
     assert r.status_code == 302  # редирект на главную
-    assert b"Выйти" in client.get("/").data
+    assert "Выйти".encode() in client.get("/").data
 ```
 
 Для API: `r = client.post("/api/comments", json={"post_id": 1, "text": "Привет"})` → проверь 201 и JSON-ответ. Для тестов используй отдельную тестовую базу (например, `sqlite:///:memory:` через `TESTING = True` в конфигурации). Docker: образ `python:3.12-slim`, установка зависимостей, копирование кода, CMD с Gunicorn. `docker-compose.yml`:

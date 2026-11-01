@@ -5,17 +5,27 @@
 <section class="page-head">
   <div class="container">
     <h1>🧠 Тренажёр вопросов</h1>
-    <p class="lead muted">10 случайных вопросов из всего курса. Отвечай и проверяй себя — отличная подготовка к экзаменам.</p>
+    <p class="lead muted">Случайные вопросы из всего курса. Отвечай и проверяй себя.</p>
+    <div class="search-form" style="max-width: 640px;">
+      <a class="btn {% if not interview %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'practice' %}">Тренажёр (10 вопросов)</a>
+      <a class="btn {% if interview %}btn-primary{% else %}btn-ghost{% endif %}" href="{% url 'practice' %}?mode=interview">Режим собеседования (15 вопросов, таймер)</a>
+    </div>
   </div>
 </section>
 
 <section class="section">
   <div class="container">
     <div class="card" style="padding: 24px;">
+      {% if interview %}
+        <div class="interview-bar">
+          <span class="chip">⏱ 60 секунд на вопрос</span>
+          <span class="interview-progress" id="interviewProgress"></span>
+        </div>
+      {% endif %}
       <div id="practiceQuestions" class="quiz-block"></div>
       <div class="quiz-actions">
         <button type="button" class="btn btn-primary" id="practiceCheck">Проверить ответы</button>
-        <button type="button" class="btn btn-ghost" id="practiceReload" onclick="location.reload()">🔄 Другие вопросы</button>
+        <a class="btn btn-ghost" href="{% url 'practice' %}">🔄 Другие вопросы</a>
         <span id="practiceScore" class="quiz-score"></span>
       </div>
     </div>

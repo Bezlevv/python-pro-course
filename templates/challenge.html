@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Задание недели — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>🔥 Задание недели</h1>
+    <p class="lead muted">Каждую неделю курс предлагает случайный урок для фокуса — пройди его полностью, чтобы держать себя в тонусе. Неделя: {{ week_label }}.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="card" style="padding: 28px;">
+      <div class="chips">
+        <span class="chip">Модуль {{ lesson.module.order }} · {{ lesson.module.title }}</span>
+        <span class="chip chip-diff chip-{{ lesson.difficulty }}">{{ difficulty_label }}</span>
+        <span class="chip">⏱ {{ lesson.duration }}</span>
+      </div>
+      <h2 style="margin-top: 12px;">{{ lesson.title }}</h2>
+      {% if lesson.summary %}<p class="muted">{{ lesson.summary }}</p>{% endif %}
+
+      <div class="lesson-list" style="margin-top: 18px;">
+        {% for t in tasks %}
+          <div class="lesson-row">
+            <span class="lesson-num">{{ t.num }}</span>
+            <div class="lesson-info">
+              <div class="lesson-title">Задача {{ t.num }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap;">
+        <a class="btn btn-primary btn-lg" href="{{ lesson.get_absolute_url }}">Перейти к уроку →</a>
+        <a class="btn btn-ghost btn-lg" href="{% url 'modules' %}">Все модули</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
