@@ -44,7 +44,7 @@ import hashlib
 import hmac
 import json
 
-KEY = b"очень-секретный-ключ"
+KEY = "очень-секретный-ключ".encode()
 
 def sign(payload: dict) -> str:
     body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
@@ -102,7 +102,7 @@ pickle — мощный, но опасный инструмент: он выпо
 
 <!--HINT-->
 ### Подсказка 1
-`rpartition(".")` возвращает кортеж `(до, разделитель, после)` — бери `[0]` и `[2]`. `base64.urlsafe_b64decode` для разбора тела. Ключ задай как глобальную константу: `KEY = b"секретный-ключ"`. Не забудь `hmac.compare_digest`.
+`rpartition(".")` возвращает кортеж `(до, разделитель, после)` — бери `[0]` и `[2]`. `base64.urlsafe_b64decode` для разбора тела. Ключ задай как глобальную константу: `KEY = "секретный-ключ".encode()`. Не забудь `hmac.compare_digest`.
 ### Подсказка 2
 Метод `__reduce__` возвращает кортеж `(функция, аргументы)`. `pickle.dumps` сериализует; `pickle.loads` выполнит при распаковке — поэтому мы его не вызываем, а только показываем `payload[:40]`.
 ### Подсказка 3
@@ -123,7 +123,7 @@ import hashlib
 import hmac
 import json
 
-KEY = b"секретный-ключ"
+KEY = "секретный-ключ".encode()
 
 def sign(payload):
     body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()

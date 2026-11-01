@@ -133,7 +133,7 @@ def add():
     title = request.form["title"].strip()
     if title:
         con = sqlite3.connect(DB)
-        con.execute("INSERT INTO tasks (title) VALUES (?)\ (title,))
+        con.execute("INSERT INTO tasks (title) VALUES (?)", (title,))
         con.commit()
         con.close()
     return redirect(url_for("index"))

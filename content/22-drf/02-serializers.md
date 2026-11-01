@@ -21,9 +21,11 @@ data = [{"id": b.id, "title": b.title, "author": b.author} for b in books]
 А если полей двадцать, а ещё есть связанные модели? Вручную это превращается в ад. Сериализатор решает задачу одной строкой:
 
 ```python
-serializer = BookSerializer(books, many=True)
-return Response(serializer.data)
+def book_list(request):
+    serializer = BookSerializer(Book.objects.all(), many=True)
+    return Response(serializer.data)
 ```
+
 
 Дополнительный бонус: сериализаторы умеют **валидировать** входящие данные и создавать/обновлять объекты.
 

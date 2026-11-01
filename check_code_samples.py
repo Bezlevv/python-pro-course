@@ -28,8 +28,9 @@ django.setup()
 from learn.utils import run_python_code
 
 CONTENT = Path(__file__).resolve().parent / 'content'
-FENCE_RE = re.compile(r'```python\s*\n(.*?)```', re.S)
+FENCE_RE = re.compile(r'```(python|python-error)\s*\n(.*?)```', re.S)
 SKIP_HINTS = ('…', '...', '>>> ', '<...>', 'PYTHONPATH', 'from __future__')
+ENV_DEP_TOKENS = ('open(', 'breakpoint(', 'input(')
 
 
 def looks_like_stub(code):
@@ -42,6 +43,7 @@ def main():
     total_blocks = 0
     checked = 0
     skipped = 0
+    env_dep = 0
 
     for folder in sorted(CONTENT.iterdir()):
         if not folder.is_dir() or folder.name.startswith('.'):
@@ -50,11 +52,11 @@ def main():
             if path.name == 'module.md' or path.name.startswith('99-'):
                 continue
             text = path.read_text(encoding='utf-8')
-            blocks = FENCE_RE.findall(text)
-            for block in blocks:
+            matches = FENCE_RE.findall(text)
+            for lang, block in matches:
                 total_blocks += 1
                 code = block.strip()
-                if not code or looks_like_stub(code):
+                if not code or lang == 'python-error' or looks_like_stub(code):
                     skipped += 1
                     continue
                 checked += 1
@@ -63,12 +65,15 @@ def main():
                 except SyntaxError as exc:
                     errors.append(f'{path.name}: синтаксис ({exc.lineno}): {exc.msg}')
                     continue
+                if any(tok in code for tok in ENV_DEP_TOKENS):
+                    env_dep += 1
+                    continue
                 if 'import' not in code and len(code) < 500:
                     result = run_python_code(code)
                     if not result.get('ok') and result.get('error'):
                         warnings.append(f'{path.name}: runtime: {result["error"][:120]}')
 
-    print(f'Блоков кода найдено: {total_blocks} (проверено {checked}, пропущено-заглушек {skipped})')
+    print(f'Блоков кода найдено: {total_blocks} (проверено {checked}, пропущено-заглушек {skipped}, средозависимых {env_dep})')
     if errors:
         print(f'\nОШИБКИ синтаксиса ({len(errors)}):')
         for e in errors:

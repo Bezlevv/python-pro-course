@@ -56,6 +56,7 @@ from datetime import datetime, timedelta, timezone
 
 SECRET_KEY = "очень-секретный-ключ"
 
+
 def create_token(user_id: int) -> str:
     payload = {
         "sub": str(user_id),
@@ -63,10 +64,12 @@ def create_token(user_id: int) -> str:
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
-def read_token(token=[redacted] -> int:
+
+def read_token(token: str) -> int:
     payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
     return int(payload["sub"])
 ```
+
 
 `jwt.encode` создаёт токен, `jwt.decode` проверяет подпись и срок действия. Если токен просрочен или подпись неверна — поднимется исключение `jwt.ExpiredSignatureError` или `jwt.InvalidTokenError`.
 

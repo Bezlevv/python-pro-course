@@ -20,7 +20,7 @@ import hashlib
 import secrets
 
 salt = secrets.token_bytes(16)
-password = b"Пароль123"
+password = "Пароль123".encode()
 digest = hashlib.pbkdf2_hmac("sha256", password, salt, 600_000)
 print(salt.hex(), digest.hex())
 ```
@@ -51,7 +51,7 @@ from cryptography.fernet import Fernet
 
 key = Fernet.generate_key()          # str: base64-ключ
 f = Fernet(key)
-token = f.encrypt(b"секретные данные")
+token = f.encrypt("секретные данные".encode())
 print(f.decrypt(token).decode())
 ```
 
@@ -65,7 +65,7 @@ print(f.decrypt(token).decode())
 import hmac
 import hashlib
 
-key = b"ключ"
+key = "ключ".encode()
 message = b"data"
 mac = hmac.new(key, message, hashlib.sha256).hexdigest()
 # проверка: hmac.new(key, message, hashlib.sha256).hexdigest() == mac

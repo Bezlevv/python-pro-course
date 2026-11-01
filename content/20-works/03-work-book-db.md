@@ -122,6 +122,15 @@ class Book:
 ### Разбор 2
 
 ```python
+class Book:
+    def __init__(self, title, author, year=2000, genre="", read=False, rating=None):
+        self.title = title
+        self.author = author
+        self.year = year
+        self.genre = genre
+        self.read = read
+        self.rating = rating
+
     def to_dict(self):
         return {
             "title": self.title,
@@ -140,6 +149,7 @@ class Book:
     def __eq__(self, other):
         return (self.title == other.title and self.author == other.author)
 ```
+
 
 `to_dict` превращает объект в обычный словарь — именно его можно записать в JSON. `from_dict` — метод класса (`@classmethod`): он создаёт экземпляр из словаря; `cls` здесь — сам класс `Book`. `__eq__` определяет, когда две книги считаются одинаковыми: по названию и автору — это пригодится для проверки дубликатов.
 
@@ -181,6 +191,11 @@ class Library:
 ```python
 import json
 
+
+class Library:
+    def __init__(self):
+        self.books = []
+
     def save(self, path):
         with open(path, "w", encoding="utf-8") as f:
             json.dump([b.to_dict() for b in self.books], f,
@@ -198,6 +213,7 @@ import json
             pass
         return lib
 ```
+
 
 `save` записывает список словарей. `ensure_ascii=False` сохраняет русские буквы как есть (иначе JSON был бы полон `\u...`-последовательностей), `indent=2` делает файл читаемым. `load` — метод класса: он создаёт пустую библиотеку и наполняет её из файла. Если файла нет или он повреждён, программа молча начинает с пустой библиотеки — это устойчивое поведение.
 

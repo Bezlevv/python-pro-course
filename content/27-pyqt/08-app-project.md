@@ -208,12 +208,16 @@ pyinstaller --onefile --windowed --name NotesApp main.py
 
 2. **Файлы ресурсов (иконки, шрифты, данные).** При `--onefile` ресурсы распаковываются во временную папку. Её путь доступен через `sys._MEIPASS`:
 
-   ```python
-   import sys, os
-   def resource_path(relative):
-       base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-       return os.path.join(base, relative)
-   ```
+```python
+import sys
+import os
+
+
+def resource_path(relative):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative)
+```
+
 
    Используй `resource_path("notes.json")` для доступа к файлам рядом с программой.
 
@@ -351,6 +355,12 @@ if __name__ == "__main__":
 Решение:
 
 ```python
+class NotesWindow(QMainWindow):
+    def __init__(self):
+        self.notes = []
+        self.edit = None
+        self.list_widget = None
+
     def add_note(self):
         text = self.edit.text().strip()
         if not text:
@@ -370,6 +380,7 @@ if __name__ == "__main__":
             self.notes.pop(row)
             self.list_widget.takeItem(row)
 ```
+
 
 В `__init__` добавь `self.notes = []` и соединения: `self.add_btn.clicked.connect(self.add_note)`, `self.del_btn.clicked.connect(self.delete_note)`, `self.edit.returnPressed.connect(self.add_note)`.
 
