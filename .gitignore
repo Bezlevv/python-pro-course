@@ -1,6 +1,9 @@
 # База данных
 db.sqlite3
 
+# Служебные файлы оркестрации
+.zwork/
+
 # Python
 __pycache__/
 *.py[cod]
