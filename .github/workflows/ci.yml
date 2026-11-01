@@ -24,6 +24,9 @@ jobs:
       - name: Валидация контента
         run: python validate_content.py
 
+      - name: Проверка кода-примеров в уроках
+        run: python check_code_samples.py
+
       - name: Миграции и наполнение БД
         run: |
           python manage.py migrate
