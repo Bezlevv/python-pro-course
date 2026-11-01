@@ -596,6 +596,11 @@ b, strong { color: var(--text); }
   .cert { border-radius: 0; box-shadow: none; border: 2px solid #000; }
 }
 
+/* Отзывы */
+.rating-row { display: grid; gap: 10px; }
+.rating-stars { font-weight: 800; color: var(--warn); }
+.feedback-widget { padding: 20px 24px; margin-bottom: 24px; }
+
 /* Фильтры поиска */
 .filter-select {
   background: var(--surface); color: var(--text); border: 1px solid var(--border);

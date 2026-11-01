@@ -353,6 +353,16 @@ class ViewTests(TestCase):
         r = self.client.get(reverse('goals'))
         self.assertEqual(r.status_code, 200)
 
+    def test_feedback_flow(self):
+        self.client.login(username='stud', password='pass12345')
+        r = self.client.post(reverse('submit_feedback', args=[self.lesson.id]), {'rating': '5', 'text': 'Отличный урок!'})
+        self.assertEqual(r.status_code, 302)
+        r = self.client.get(reverse('feedback_list'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Отличный урок!')
+        r = self.client.get(self.lesson.get_absolute_url())
+        self.assertContains(r, 'Оценить урок')
+
     def test_practice_page_ok(self):
         self.lesson.quiz_md = QUIZ_SAMPLE
         self.lesson.save()

@@ -102,6 +102,46 @@
       {% endfor %}
     </div>
 
+    {% if next_lessons or unfinished %}
+      <div class="section-head" style="margin-top: 40px;">
+        <h2>Рекомендуем дальше</h2>
+        <p class="muted">Следующие шаги на основе твоего прогресса.</p>
+      </div>
+      {% if next_lessons %}
+        <div class="list-cards">
+          {% for lesson in next_lessons %}
+            <a class="card row-card" href="{{ lesson.get_absolute_url }}">
+              <span class="row-icon">{{ lesson.module.icon }}</span>
+              <div class="row-text">
+                <div class="row-title">{{ lesson.title }}</div>
+                <div class="row-sub">{{ lesson.module.title }} · {{ lesson.duration }}</div>
+              </div>
+              <span class="row-arrow">→</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if unfinished %}
+        <div class="profile-modules" style="margin-top: 16px;">
+          {% for item in unfinished %}
+            <div class="card profile-module">
+              <div class="profile-module-head">
+                <span class="module-icon">{{ item.module.icon }}</span>
+                <div>
+                  <div class="profile-module-title"><a href="{{ item.module.get_absolute_url }}">{{ item.module.title }}</a></div>
+                  <div class="muted">{{ item.done }} из {{ item.total }} уроков</div>
+                </div>
+                <b class="profile-module-pct">{{ item.pct }}%</b>
+              </div>
+              <div class="progress-track">
+                <div class="progress-fill" style="width: {{ item.pct }}%"></div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endif %}
+
     <div class="section-head" style="margin-top: 40px;">
       <h2>Модули</h2>
     </div>

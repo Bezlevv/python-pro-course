@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -16,6 +16,7 @@ from .models import (
     Achievement,
     CodeAttempt,
     Comment,
+    Feedback,
     Lesson,
     LessonNote,
     LessonProgress,
@@ -156,6 +157,11 @@ def _lesson_ctx(request, lesson):
     if request.user.is_authenticated:
         note_obj = LessonNote.objects.filter(user=request.user, lesson=lesson).first()
         note = note_obj.text if note_obj else ''
+    rating_rows = lesson.feedback.exclude(rating__isnull=True)
+    rating = {'avg': None, 'count': 0}
+    if rating_rows.exists():
+        agg = rating_rows.aggregate(avg=Avg('rating'), cnt=Count('id'))
+        rating = {'avg': round(agg['avg'], 1), 'count': agg['cnt']}
     return {
         'lesson': lesson,
         'theory_html': render_markdown(lesson.theory_md),
@@ -174,6 +180,7 @@ def _lesson_ctx(request, lesson):
         'note': note,
         'is_exam': lesson.is_exam,
         'has_tests': bool(lesson.test_cases_md.strip()),
+        'rating': rating,
         'module_done': sum(1 for l in module_lessons if l.id in done_ids),
         'module_pct': round(sum(1 for l in module_lessons if l.id in done_ids) / len(module_lessons) * 100) if module_lessons else 0,
     }
@@ -484,6 +491,16 @@ def profile(request):
     all_achievements = Achievement.objects.all()
     achieved_ids = {ua.achievement_id for ua in achievements}
     user_xp = xp_for_user(request.user)
+
+    next_lessons = list(
+        Lesson.objects.exclude(is_exam=True)
+        .exclude(id__in=done_map.keys())
+        .order_by('module__order', 'order')[:5]
+    )
+    unfinished = sorted(
+        [item for item in data if item['done'] < item['total']],
+        key=lambda x: (x['pct'], x['module'].order),
+    )[:4]
     return render(request, 'profile.html', {
         'data': data,
         'total_lessons': total,
@@ -498,12 +515,39 @@ def profile(request):
         'heat': weeks,
         'xp': user_xp,
         'level': level_info(user_xp),
+        'next_lessons': next_lessons,
+        'unfinished': unfinished,
     })
 
 
 def reference(request):
     """Страница «Справочник»: шпаргалки и глоссарий."""
     return render(request, 'reference.html')
+
+
+@require_POST
+@login_required
+def submit_feedback(request, lesson_id):
+    lesson = get_object_or_404(Lesson, id=lesson_id)
+    try:
+        rating = int(request.POST.get('rating', 5))
+    except ValueError:
+        rating = 5
+    rating = max(1, min(5, rating))
+    text = request.POST.get('text', '').strip()[:2000]
+    Feedback.objects.create(user=request.user, lesson=lesson, rating=rating, text=text)
+    messages.success(request, 'Спасибо за обратную связь! 💛')
+    return redirect(lesson.get_absolute_url())
+
+
+def feedback_list(request):
+    items = Feedback.objects.select_related('user', 'lesson__module').all()[:60]
+    overall = Feedback.objects.aggregate(avg=Avg('rating'), cnt=Count('id'))
+    return render(request, 'feedback.html', {
+        'items': items,
+        'overall_avg': round(overall['avg'], 1) if overall['avg'] else None,
+        'overall_count': overall['cnt'],
+    })
 
 
 def challenge(request):

@@ -202,3 +202,20 @@ class CodeAttempt(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class Feedback(models.Model):
+    """Отзыв ученика об уроке / о курсе."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='feedback', on_delete=models.CASCADE)
+    lesson = models.ForeignKey(Lesson, related_name='feedback', on_delete=models.CASCADE, null=True, blank=True)
+    rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)], default=5, verbose_name='Оценка')
+    text = models.TextField(blank=True, verbose_name='Отзыв')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Отзыв'
+        verbose_name_plural = 'Отзывы'
+
+    def __str__(self):
+        return f'{self.user.username}: {self.rating}★'

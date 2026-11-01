@@ -7,6 +7,7 @@ from .models import (
     Achievement,
     CodeAttempt,
     Comment,
+    Feedback,
     Lesson,
     LessonNote,
     LessonProgress,
@@ -74,6 +75,13 @@ class AchievementAdmin(admin.ModelAdmin):
 class UserAchievementAdmin(admin.ModelAdmin):
     list_display = ('user', 'achievement', 'awarded_at')
     search_fields = ('user__username', 'achievement__title')
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    list_display = ('user', 'lesson', 'rating', 'created_at')
+    list_filter = ('rating', 'lesson__module')
+    search_fields = ('user__username', 'text')
 
 
 @admin.register(CodeAttempt)

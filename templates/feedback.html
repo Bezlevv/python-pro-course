@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Отзывы — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>💛 Отзывы учеников</h1>
+    <p class="lead muted">
+      {% if overall_avg %}{{ overall_avg }} ★ в среднем · {{ overall_count }} отзывов{% endif %}
+    </p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="comments-list">
+      {% for f in items %}
+        <div class="comment">
+          <div class="comment-meta">
+            <b>{{ f.user.username }}</b> ·
+            {% if f.lesson %}
+              <a href="{{ f.lesson.get_absolute_url }}">{{ f.lesson.module.title }} → {{ f.lesson.title }}</a>
+            {% else %}
+              курс в целом
+            {% endif %}
+            · <span class="muted">{{ f.created_at|date:"d.m.Y" }}</span>
+            · <span class="rating-stars">{{ f.rating }} ★</span>
+          </div>
+          {% if f.text %}<div>{{ f.text|linebreaksbr }}</div>{% endif %}
+        </div>
+      {% empty %}
+        <p class="muted">Отзывов пока нет — стань первым!</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}
