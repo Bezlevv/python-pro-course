@@ -483,6 +483,25 @@ b, strong { color: var(--text); }
   border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border));
 }
 
+/* Уровень */
+.level-card {
+  margin-top: 22px; max-width: 560px;
+  padding: 18px 22px; border: 1px solid var(--border);
+  border-radius: 14px; background: var(--surface);
+  display: grid; gap: 10px;
+}
+.level-name { font-size: 1.25rem; font-weight: 800; }
+.level-xp { color: var(--accent2); font-weight: 750; }
+
+/* Лидерборд */
+.leaderboard-table { width: 100%; border-collapse: collapse; }
+.leaderboard-table th, .leaderboard-table td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border); }
+.leaderboard-table th { background: var(--surface2); color: var(--muted); font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; }
+.leaderboard-table tbody tr:hover { background: var(--surface2); }
+.leaderboard-table tr.me { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lb-place { font-size: 1.15rem; font-weight: 750; width: 60px; }
+.lb-xp { font-weight: 800; color: var(--accent2); }
+
 /* Активность */
 .activity-strip {
   display: flex; align-items: flex-end; gap: 6px;

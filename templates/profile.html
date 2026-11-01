@@ -17,8 +17,22 @@
       <div class="stat"><b>{% if streak %}{{ streak }}{% else %}0{% endif %} 🔥</b><span>дней подряд</span></div>
     </div>
 
+    <div class="level-card">
+      <div class="level-name">{{ level.name }}</div>
+      <div class="level-xp">{{ xp }} XP</div>
+      {% if level.next_threshold %}
+        <div class="progress-track">
+          <div class="progress-fill" style="width: {{ level.progress }}%"></div>
+        </div>
+        <div class="muted" style="font-size: .85rem;">До следующего уровня: {{ level.next_threshold }} XP</div>
+      {% else %}
+        <div class="muted" style="font-size: .85rem;">Максимальный уровень! 🎉</div>
+      {% endif %}
+    </div>
+
     <div class="profile-actions">
       <a class="btn btn-ghost" href="{% url 'export_progress' %}">⬇ Экспорт прогресса (CSV)</a>
+      <a class="btn btn-ghost" href="{% url 'leaderboard' %}">🏆 Таблица лидеров</a>
     </div>
 
     {% if activity %}

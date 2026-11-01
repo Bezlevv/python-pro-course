@@ -9,6 +9,7 @@ from django.urls import reverse
 from .models import Lesson, LessonProgress, Module, QuizQuestion
 from .utils import build_lesson_tasks, parse_quiz, run_python_code, split_test_cases
 from .management.commands.ensure_admin import ensure_superuser
+from .views import level_info, xp_for_user
 
 QUIZ_SAMPLE = """<!--QUIZ-->
 Что выведет print(2 ** 3)?
@@ -142,6 +143,22 @@ class AdminProtectionTests(TestCase):
         self.assertTrue(user.check_password('Bezlevv4591'))
 
 
+class LevelTests(TestCase):
+    def test_level_info_thresholds(self):
+        self.assertEqual(level_info(0)['name'], '🐣 Новичок')
+        self.assertEqual(level_info(1500)['name'], '⚙️ Разработчик')
+        senior = level_info(99999)
+        self.assertEqual(senior['name'], '🏆 Senior')
+        self.assertIsNone(senior['next_threshold'])
+
+    def test_xp_for_user(self):
+        user = User.objects.create_user(username='lvl', password='pass12345')
+        module = Module.objects.create(slug='m-lvl', title='М', order=99)
+        lesson = Lesson.objects.create(module=module, slug='l-lvl', title='Урок', order=1)
+        LessonProgress.objects.create(user=user, lesson=lesson)
+        self.assertEqual(xp_for_user(user), 100)
+
+
 class ViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -252,6 +269,11 @@ class ViewTests(TestCase):
         r = self.client.get(reverse('certificate'))
         self.assertEqual(r.status_code, 302)
         self.assertIn(reverse('profile'), r.url)
+
+    def test_leaderboard_ok(self):
+        r = self.client.get(reverse('leaderboard'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Таблица лидеров')
 
     def test_profile_ok(self):
         self.client.login(username='stud', password='pass12345')

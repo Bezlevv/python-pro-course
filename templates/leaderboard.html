@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Таблица лидеров — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>🏆 Таблица лидеров</h1>
+    <p class="lead muted">Топ учеников по опыту: 100 XP за решённый урок, +50 XP за достижение.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="card">
+      <table class="leaderboard-table">
+        <thead>
+          <tr><th>#</th><th>Ученик</th><th>Уровень</th><th>XP</th></tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr class="{% if row.user == user %}me{% endif %}">
+              <td class="lb-place">
+                {% if forloop.counter == 1 %}🥇{% elif forloop.counter == 2 %}🥈{% elif forloop.counter == 3 %}🥉{% else %}{{ forloop.counter }}{% endif %}
+              </td>
+              <td>{{ row.user.username }}{% if row.user == user %} <span class="chip">это вы</span>{% endif %}</td>
+              <td>{{ row.level_name }}</td>
+              <td class="lb-xp">{{ row.xp }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="muted">Пока нет участников — стань первым! 🚀</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

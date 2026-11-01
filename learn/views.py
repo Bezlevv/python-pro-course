@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -73,6 +74,45 @@ def _streak(user):
         streak += 1
         current -= timedelta(days=1)
     return streak
+
+
+LEVELS = [
+    (0, '🐣 Новичок'),
+    (300, '🌱 Ученик'),
+    (800, '📘 Программист'),
+    (1500, '⚙️ Разработчик'),
+    (2500, '🚀 Продвинутый'),
+    (4000, '🧙 Эксперт'),
+    (6000, '🏆 Senior'),
+]
+
+
+def xp_for_user(user):
+    """Очки опыта: 100 за решённый урок + 50 за достижение."""
+    done = LessonProgress.objects.filter(user=user, completed_at__isnull=False).count()
+    ach = UserAchievement.objects.filter(user=user).count()
+    return done * 100 + ach * 50
+
+
+def level_info(xp):
+    """Возвращает уровень по XP: имя, пороги, прогресс до следующего."""
+    current_index = 0
+    for i, (threshold, name) in enumerate(LEVELS):
+        if xp >= threshold:
+            current_index = i
+    current_threshold, current_name = LEVELS[current_index]
+    if current_index + 1 < len(LEVELS):
+        next_threshold = LEVELS[current_index + 1][0]
+        progress = round((xp - current_threshold) / (next_threshold - current_threshold) * 100) \
+            if next_threshold > current_threshold else 0
+        return {
+            'name': current_name, 'xp': xp, 'index': current_index,
+            'current_threshold': current_threshold,
+            'next_threshold': next_threshold,
+            'progress': progress,
+        }
+    return {'name': current_name, 'xp': xp, 'index': current_index,
+            'current_threshold': current_threshold, 'next_threshold': None, 'progress': 100}
 
 
 def _completed_modules_count(user):
@@ -419,6 +459,7 @@ def profile(request):
     )
     all_achievements = Achievement.objects.all()
     achieved_ids = {ua.achievement_id for ua in achievements}
+    user_xp = xp_for_user(request.user)
     return render(request, 'profile.html', {
         'data': data,
         'total_lessons': total,
@@ -430,12 +471,27 @@ def profile(request):
         'achieved_ids': achieved_ids,
         'all_achievements': all_achievements,
         'activity': activity,
+        'xp': user_xp,
+        'level': level_info(user_xp),
     })
 
 
 def reference(request):
     """Страница «Справочник»: шпаргалки и глоссарий."""
     return render(request, 'reference.html')
+
+
+def leaderboard(request):
+    """Публичная таблица лидеров по опыту."""
+    users = User.objects.annotate(
+        done=Count('progress', filter=Q(progress__completed_at__isnull=False)),
+        ach=Count('achievements'),
+    ).order_by('-done')[:20]
+    rows = []
+    for u in users:
+        xp = u.done * 100 + u.ach * 50
+        rows.append({'user': u, 'xp': xp, 'level_name': level_info(xp)['name']})
+    return render(request, 'leaderboard.html', {'rows': rows})
 
 
 @login_required

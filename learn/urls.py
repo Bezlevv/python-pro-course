@@ -17,6 +17,7 @@ urlpatterns = [
     path('lessons/<int:lesson_id>/note/', views.save_note, name='save_note'),
     path('search/', views.search, name='search'),
     path('reference/', views.reference, name='reference'),
+    path('leaderboard/', views.leaderboard, name='leaderboard'),
     path('certificate/', views.certificate, name='certificate'),
     path('profile/', views.profile, name='profile'),
     path('profile/export/', views.export_progress, name='export_progress'),
