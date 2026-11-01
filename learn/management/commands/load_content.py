@@ -104,12 +104,14 @@ class Command(BaseCommand):
                         'duration': data.get('duration', '20 мин'),
                         'difficulty': data.get('difficulty', 'beginner'),
                         'tags': data.get('tags', ''),
+                        'is_exam': str(data.get('exam', '')).strip().lower() == 'true',
                         'theory_md': data['theory_md'],
                         'task_md': data['task_md'],
                         'hint_md': data['hint_md'],
                         'solution_md': data['solution_md'],
                         'quiz_md': data['quiz_md'],
                         'expected_output_md': data['expected_output_md'],
+                        'test_cases_md': data['test_cases_md'],
                     },
                 )
                 _sync_quizzes(lesson, data['quiz_md'])

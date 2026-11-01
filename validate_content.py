@@ -72,6 +72,12 @@ def main():
             solution_words = words_count(data.get('solution_md', ''))
             tasks_count = len(split_numbered_sections(data.get('task_md', ''), TASK_SECTION_RE))
             quizzes_count = len(parse_quiz(data.get('quiz_md', '')))
+            is_exam = str(data.get('exam', '')).strip().lower() == 'true'
+
+            if is_exam:
+                if quizzes_count < 8:
+                    errors.append(f'{path}: у экзамена должно быть не меньше 8 вопросов (сейчас {quizzes_count})')
+                continue
 
             if theory_words < MIN_THEORY_WORDS:
                 errors.append(f'{path}: теория слишком короткая ({theory_words} слов < {MIN_THEORY_WORDS})')

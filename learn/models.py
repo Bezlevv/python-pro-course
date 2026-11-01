@@ -48,6 +48,8 @@ class Lesson(models.Model):
     solution_md = models.TextField(default='', verbose_name='Разбор (Markdown)')
     quiz_md = models.TextField(default='', verbose_name='Викторина (Markdown)')
     expected_output_md = models.TextField(default='', verbose_name='Ожидаемый вывод')
+    test_cases_md = models.TextField(default='', verbose_name='Тест-кейсы (Markdown)')
+    is_exam = models.BooleanField(default=False, verbose_name='Экзамен')
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:

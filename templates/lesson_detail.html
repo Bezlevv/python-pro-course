@@ -53,14 +53,20 @@
           {% endif %}
         </header>
 
-        {% if theory_html %}
+        {% if lesson.is_exam %}
+          <section class="content-block">
+            <div class="alert alert-info">📋 Это экзамен по модулю. Ответь на все вопросы — для сдачи нужно не менее <b>80%</b> правильных ответов.</div>
+          </section>
+        {% endif %}
+
+        {% if not lesson.is_exam and theory_html %}
           <section class="content-block">
             <h2 class="block-title">📖 Теория</h2>
             <div class="md-body">{{ theory_html|safe }}</div>
           </section>
         {% endif %}
 
-        {% if tasks %}
+        {% if not lesson.is_exam and tasks %}
           <section class="content-block task-block">
             <h2 class="block-title">🎯 Задачи</h2>
             {% for t in tasks %}
@@ -91,18 +97,24 @@
           </section>
         {% endif %}
 
-        {% if user.is_authenticated %}
+        {% if not lesson.is_exam and user.is_authenticated %}
           <section class="content-block sandbox">
             <h2 class="block-title">⚡ Песочница кода</h2>
             <p class="muted">Запусти код прямо здесь — сервер выполнит его с ограничениями (тайм-аут, запрет на импорт системных модулей).</p>
             <textarea id="sandboxCode" class="sandbox-code" spellcheck="false" placeholder="# Напиши код и нажми «Запустить»"></textarea>
             <div class="sandbox-actions">
               <button type="button" class="btn btn-primary" id="sandboxRun" data-url="{% url 'run_code' lesson.id %}">Запустить ▶</button>
+              {% if has_tests %}
+                <button type="button" class="btn btn-ghost" id="testsRun" data-url="{% url 'check_tests' lesson.id %}">Запустить автопроверку 🧪</button>
+              {% endif %}
               <span class="sandbox-status muted" id="sandboxStatus"></span>
             </div>
             <pre id="sandboxOutput" class="sandbox-output hidden"></pre>
+            {% if has_tests %}
+              <pre id="testsResults" class="sandbox-output hidden"></pre>
+            {% endif %}
           </section>
-        {% else %}
+        {% elif not lesson.is_exam %}
           <section class="content-block">
             <div class="alert">
               <a href="{% url 'login' %}?next={{ lesson.get_absolute_url|urlencode }}">Войди</a>,
@@ -114,7 +126,7 @@
         {% if quizzes %}
           <section class="content-block quiz-block">
             <h2 class="block-title">✅ Викторина</h2>
-            <div id="quizForm">
+            <div id="quizForm" {% if lesson.is_exam %}data-exam="1"{% endif %}>
               {% for q in quizzes %}
                 <div class="quiz-question" data-index="{{ forloop.counter0 }}">
                   <div class="quiz-q-text">{{ forloop.counter }}. {{ q.question }}</div>
@@ -131,6 +143,15 @@
                 <button type="button" class="btn btn-primary" id="quizCheck" data-url="{% url 'quiz_check' lesson.id %}">Проверить ответы</button>
                 <span id="quizScore" class="quiz-score"></span>
               </div>
+              {% if lesson.is_exam %}
+                <div id="examPassWrap" class="hidden exam-pass">
+                  <p>🎉 Экзамен сдан! Отметь завершение и получи достижение.</p>
+                  <form method="post" action="{% url 'complete_lesson' lesson.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary btn-lg">Экзамен сдан ✓</button>
+                  </form>
+                </div>
+              {% endif %}
             </div>
           </section>
         {% endif %}

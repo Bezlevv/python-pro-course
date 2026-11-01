@@ -134,9 +134,18 @@
       });
       var url = quizBtn.dataset.url;
       if (!url) return;
+      var examForm = document.querySelector('#quizForm[data-exam]');
+      var examWrap = document.getElementById('examPassWrap');
       postJSON(url, { answers: answers }).then(function (res) {
         var scoreEl = document.getElementById('quizScore');
         if (scoreEl) scoreEl.textContent = res.score + ' из ' + res.total;
+        if (examForm && examWrap && res.total) {
+          var pct = res.score / res.total * 100;
+          examWrap.classList.toggle('hidden', pct < 80);
+          if (pct < 80) {
+            if (scoreEl) scoreEl.textContent += ' — нужно не менее 80% для сдачи';
+          }
+        }
         res.results.forEach(function (r, i) {
           var q = questions[i];
           if (!q) return;
@@ -180,6 +189,42 @@
             if (noteStatus) noteStatus.textContent = 'Ошибка сохранения';
           });
       }, 800);
+    });
+  }
+  /* --- Автопроверка по тест-кейсам --- */
+  var testsBtn = document.getElementById('testsRun');
+  if (testsBtn) {
+    testsBtn.addEventListener('click', function () {
+      var codeEl = document.getElementById('sandboxCode');
+      var outEl = document.getElementById('testsResults');
+      var url = testsBtn.dataset.url;
+      if (!codeEl || !outEl || !url) return;
+      if (!codeEl.value.trim()) {
+        outEl.textContent = 'Сначала напиши код в песочнице.';
+        outEl.classList.remove('hidden');
+        return;
+      }
+      outEl.classList.add('hidden');
+      testsBtn.disabled = true;
+      postJSON(url, { code: codeEl.value }).then(function (res) {
+        testsBtn.disabled = false;
+        if (res.error) {
+          outEl.textContent = 'Ошибка: ' + res.error;
+          outEl.classList.add('error');
+        } else {
+          outEl.classList.remove('error');
+          var lines = res.results.map(function (r) {
+            if (r.passed) return '✅ Тест ' + r.num + ' — OK';
+            return '❌ Тест ' + r.num + ' — не пройден\nОжидалось:\n' + r.expected + '\nПолучено:\n' + (r.output || r.error || 'ничего');
+          });
+          outEl.textContent = (res.all_passed ? '🎉 Все тесты пройдены!' : 'Не все тесты пройдены.') + '\n\n' + lines.join('\n\n');
+        }
+        outEl.classList.remove('hidden');
+      }).catch(function () {
+        testsBtn.disabled = false;
+        outEl.textContent = 'Ошибка запроса';
+        outEl.classList.remove('hidden');
+      });
     });
   }
 })();

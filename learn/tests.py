@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import Lesson, LessonProgress, Module, QuizQuestion
-from .utils import build_lesson_tasks, parse_quiz, run_python_code
+from .utils import build_lesson_tasks, parse_quiz, run_python_code, split_test_cases
 from .management.commands.ensure_admin import ensure_superuser
 
 QUIZ_SAMPLE = """<!--QUIZ-->
@@ -47,6 +47,22 @@ class SandboxTests(TestCase):
         result = run_python_code('print("Привет, мир!")')
         self.assertTrue(result['ok'])
         self.assertIn('Привет, мир!', result['output'])
+
+    def test_stdin_passed(self):
+        result = run_python_code('name = input()\nprint("Привет, " + name)', stdin_data='Аня\n')
+        self.assertTrue(result['ok'])
+        self.assertIn('Привет, Аня', result['output'])
+
+    def test_split_test_cases(self):
+        md = (
+            '### Тест 1\nВвод:\n```\n5\n```\nОжидаемый вывод:\n```\n25\n```\n'
+            '### Тест 2\nВвод:\n```\n7\n```\nОжидаемый вывод:\n```\n49\n```\n'
+        )
+        cases = split_test_cases(md)
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(cases[0]['input'], '5')
+        self.assertEqual(cases[0]['expected'], '25')
+        self.assertEqual(cases[1]['input'], '7')
 
     def test_banned_import_rejected(self):
         result = run_python_code('import os\nprint(os.getcwd())')
@@ -203,6 +219,22 @@ class ViewTests(TestCase):
         r = self.client.get(reverse('export_progress'))
         self.assertEqual(r.status_code, 200)
         self.assertIn('text/csv', r['Content-Type'])
+
+    def test_check_tests_endpoint(self):
+        self.lesson.test_cases_md = (
+            '### Тест 1\nВвод:\n```\n5\n```\nОжидаемый вывод:\n```\n25\n```\n'
+        )
+        self.lesson.save(update_fields=['test_cases_md'])
+        self.client.login(username='stud', password='pass12345')
+        r = self.client.post(
+            reverse('check_tests', args=[self.lesson.id]),
+            data=json.dumps({'code': 'x = int(input())\nprint(x * x)'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data['all_passed'])
+        self.assertEqual(len(data['results']), 1)
 
     def test_search_filters(self):
         r = self.client.get(reverse('search'), {'difficulty': 'beginner'})

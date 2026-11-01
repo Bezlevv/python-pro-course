@@ -27,6 +27,7 @@ from .utils import (
     normalize_output,
     render_markdown,
     run_python_code,
+    split_test_cases,
 )
 
 
@@ -129,6 +130,8 @@ def _lesson_ctx(request, lesson):
         'quizzes': list(lesson.quizzes.all()),
         'comments': list(lesson.comments.select_related('user')),
         'note': note,
+        'is_exam': lesson.is_exam,
+        'has_tests': bool(lesson.test_cases_md.strip()),
         'module_done': sum(1 for l in module_lessons if l.id in done_ids),
         'module_pct': round(sum(1 for l in module_lessons if l.id in done_ids) / len(module_lessons) * 100) if module_lessons else 0,
     }
@@ -207,6 +210,47 @@ def toggle_read(request, lesson_id):
     progress.read = not progress.read
     progress.save()
     return redirect(lesson.get_absolute_url())
+
+
+@require_POST
+@login_required
+def check_tests(request, lesson_id):
+    """Автопроверка кода по тест-кейсам урока."""
+    lesson = get_object_or_404(Lesson, id=lesson_id)
+    try:
+        payload = json.loads(request.body or '{}')
+    except ValueError:
+        payload = {}
+    code = payload.get('code', '')
+    if not code.strip():
+        return JsonResponse({'ok': False, 'error': 'Введи код для запуска'})
+
+    cases = split_test_cases(lesson.test_cases_md)
+    if not cases:
+        return JsonResponse({'ok': False, 'error': 'У урока нет тест-кейсов'})
+
+    results = []
+    all_passed = True
+    for case in cases:
+        res = run_python_code(code, stdin_data=case['input'])
+        passed = bool(res['ok']) and normalize_output(res['output']) == normalize_output(case['expected'])
+        if not passed:
+            all_passed = False
+        results.append({
+            'num': case['num'],
+            'passed': passed,
+            'error': res['error'],
+            'output': res['output'][:4000],
+            'expected': case['expected'][:1000],
+            'input': case['input'][:500],
+        })
+
+    summary = '\n'.join(f'Тест {r["num"]}: {"OK" if r["passed"] else "FAIL"}' for r in results)
+    CodeAttempt.objects.create(
+        user=request.user, lesson=lesson, code=code,
+        output=summary, passed=all_passed,
+    )
+    return JsonResponse({'ok': True, 'all_passed': all_passed, 'results': results})
 
 
 @require_POST

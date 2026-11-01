@@ -476,6 +476,13 @@ b, strong { color: var(--text); }
 .badge-title { font-weight: 750; font-size: .95rem; }
 .badge-desc { color: var(--muted); font-size: .82rem; }
 
+.exam-pass {
+  margin-top: 16px; padding: 16px 18px;
+  border-radius: 12px; text-align: center;
+  background: color-mix(in srgb, var(--ok) 10%, var(--surface2));
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border));
+}
+
 /* Фильтры поиска */
 .filter-select {
   background: var(--surface); color: var(--text); border: 1px solid var(--border);

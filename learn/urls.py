@@ -11,6 +11,7 @@ urlpatterns = [
     path('lessons/<int:lesson_id>/complete/', views.complete_lesson, name='complete_lesson'),
     path('lessons/<int:lesson_id>/read/', views.toggle_read, name='toggle_read'),
     path('lessons/<int:lesson_id>/run/', views.run_code, name='run_code'),
+    path('lessons/<int:lesson_id>/tests/', views.check_tests, name='check_tests'),
     path('lessons/<int:lesson_id>/quiz/', views.quiz_check, name='quiz_check'),
     path('lessons/<int:lesson_id>/comment/', views.add_comment, name='add_comment'),
     path('lessons/<int:lesson_id>/note/', views.save_note, name='save_note'),

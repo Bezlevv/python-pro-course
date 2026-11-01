@@ -6,7 +6,7 @@ from markdown import markdown as md_to_html
 # --- Парсинг Markdown-файла урока ---
 
 FRONT_MATTER_RE = re.compile(r'\A---\s*\n(.*?)\n---\s*\n', re.S)
-FIELDS = ('title', 'summary', 'order', 'duration', 'difficulty')
+FIELDS = ('title', 'summary', 'order', 'duration', 'difficulty', 'tags', 'exam')
 
 SECTION_MARKERS = {
     'TASK': 'task_md',
@@ -14,6 +14,7 @@ SECTION_MARKERS = {
     'SOLUTION': 'solution_md',
     'QUIZ': 'quiz_md',
     'EXPECTED_OUTPUT': 'expected_output_md',
+    'TEST_CASES': 'test_cases_md',
 }
 
 
@@ -46,7 +47,7 @@ def split_sections(body):
     # токенизируем маркеры
     tokens = []
     pos = 0
-    pattern = re.compile(r'<!--\s*(/)?\s*(TASK|HINT|SOLUTION|QUIZ|EXPECTED_OUTPUT)\s*-->')
+    pattern = re.compile(r'<!--\s*(/)?\s*(TASK|HINT|SOLUTION|QUIZ|EXPECTED_OUTPUT|TEST_CASES)\s*-->')
     for m in pattern.finditer(body):
         if m.start() > pos:
             tokens.append(('text', body[pos:m.start()]))
@@ -214,6 +215,35 @@ def build_lesson_tasks(lesson):
     return tasks
 
 
+# ---------- Тест-кейсы ----------
+
+TEST_SECTION_RE = re.compile(r'(?m)^#{2,4}\s*Тест\s*(\d+)')
+
+
+def split_test_cases(md):
+    """Разбирает блок <!--TESTS--> в список тест-кейсов.
+
+    Каждый тест: "### Тест N", затем два fenced-блока кода —
+    вход (первый) и ожидаемый вывод (второй). Если блок один,
+    он считается ожидаемым выводом без ввода.
+    """
+    cases = []
+    for num, body in split_numbered_sections(md, TEST_SECTION_RE):
+        fences = re.findall(r'```[^\n]*\n(.*?)```', body, re.S)
+        if not fences:
+            continue
+        if len(fences) > 1:
+            inp, expected = fences[0], fences[-1]
+        else:
+            inp, expected = '', fences[0]
+        cases.append({
+            'num': num,
+            'input': inp.strip('\n'),
+            'expected': expected.strip('\n'),
+        })
+    return cases
+
+
 # ---------- Песочница для запуска кода ----------
 
 import ast
@@ -229,7 +259,7 @@ BANNED_IMPORTS = {
     'ftplib', 'pickle', 'inspect', 'traceback', 'pdb', 'readline',
     'builtins', 'site', 'sysconfig', 'venv', 'ensurepip', 'platform', 'psutil',
 }
-BANNED_CALLS = {'eval', 'exec', 'compile', '__import__', 'breakpoint', 'input', 'open'}
+BANNED_CALLS = {'eval', 'exec', 'compile', '__import__', 'breakpoint', 'open'}
 SANDBOX_TIMEOUT = 6
 SANDBOX_MAX_OUTPUT = 20000
 
@@ -261,7 +291,7 @@ def _sandbox_violations(code):
     return hits
 
 
-def run_python_code(code, timeout=SANDBOX_TIMEOUT):
+def run_python_code(code, stdin_data='', timeout=SANDBOX_TIMEOUT):
     """Запускает код в песочнице, возвращает dict с результатом."""
     violations = _sandbox_violations(code)
     if violations:
@@ -276,6 +306,7 @@ def run_python_code(code, timeout=SANDBOX_TIMEOUT):
             proc = subprocess.run(
                 [sys.executable, '-B', '-s', str(script)],
                 capture_output=True, text=True, encoding='utf-8',
+                input=stdin_data,
                 timeout=timeout, cwd=tmpdir, env=env,
             )
         except subprocess.TimeoutExpired:
