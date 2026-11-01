@@ -242,6 +242,17 @@ class ViewTests(TestCase):
         r = self.client.get(reverse('search'), {'tag': 'ооп'})
         self.assertEqual(r.status_code, 200)
 
+    def test_reference_ok(self):
+        r = self.client.get(reverse('reference'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Глоссарий')
+
+    def test_certificate_requires_full_course(self):
+        self.client.login(username='stud', password='pass12345')
+        r = self.client.get(reverse('certificate'))
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(reverse('profile'), r.url)
+
     def test_profile_ok(self):
         self.client.login(username='stud', password='pass12345')
         r = self.client.get(reverse('profile'))

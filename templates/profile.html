@@ -21,6 +21,23 @@
       <a class="btn btn-ghost" href="{% url 'export_progress' %}">⬇ Экспорт прогресса (CSV)</a>
     </div>
 
+    {% if activity %}
+      <div class="activity-block">
+        <div class="section-head" style="margin-top: 36px;">
+          <h2>Активность</h2>
+          <p class="muted">Решённые уроки за последние 14 дней.</p>
+        </div>
+        <div class="activity-strip">
+          {% for day, cnt in activity %}
+            <div class="activity-day" title="{{ day }}: {{ cnt }} уроков">
+              <div class="activity-bar" style="height: {{ cnt }}0%"></div>
+              <span class="activity-label">{{ day }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
     <div class="section-head" style="margin-top: 36px;">
       <h2>Достижения</h2>
       <p class="muted">Их можно получить, решая уроки и занимаясь регулярно.</p>

@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Сертификат — PythonПро{% endblock %}
+
+{% block content %}
+<section class="section cert-section">
+  <div class="container">
+    <div class="cert" id="cert">
+      <div class="cert-top">
+        <span class="cert-logo">🐍</span>
+        <span class="cert-brand">Python<span>Про</span></span>
+      </div>
+      <div class="cert-title">СЕРТИФИКАТ</div>
+      <div class="cert-sub">подтверждает успешное прохождение курса</div>
+      <div class="cert-name">{{ user.username }}</div>
+      <div class="cert-text">
+        Прошёл(ла) все {{ total }} уроков курса «PythonПро» —<br>
+        от основ языка до продвинутых тем, проектов и деплоя.
+      </div>
+      <div class="cert-foot">
+        <div>
+          <div class="cert-label">Дата</div>
+          <div>{% now "d.m.Y" %}</div>
+        </div>
+        <div>
+          <div class="cert-label">Результат</div>
+          <div>100% курса</div>
+        </div>
+        <div class="cert-sign">
+          <div class="cert-label">Подпись</div>
+          <div class="cert-sign-name">PythonПро</div>
+        </div>
+      </div>
+    </div>
+    <div class="cert-actions">
+      <button class="btn btn-primary btn-lg" onclick="window.print()">🖨 Распечатать / сохранить в PDF</button>
+      <a class="btn btn-ghost btn-lg" href="{% url 'profile' %}">В профиль</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

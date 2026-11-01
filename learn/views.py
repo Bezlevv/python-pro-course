@@ -402,6 +402,17 @@ def profile(request):
             'pct': round(done_in / len(lessons) * 100) if lessons else 0,
         })
     last_done = sorted(done, key=lambda p: p.completed_at, reverse=True)[:5]
+    # Активность за последние 14 дней
+    start = date.today() - timedelta(days=13)
+    day_counts = {}
+    for p in done:
+        d = p.completed_at.date()
+        if d >= start:
+            day_counts[d] = day_counts.get(d, 0) + 1
+    activity = []
+    for i in range(14):
+        d = start + timedelta(days=i)
+        activity.append((d.strftime('%d.%m'), day_counts.get(d, 0)))
     achievements = (
         UserAchievement.objects.filter(user=request.user)
         .select_related('achievement').order_by('achievement__order')
@@ -418,7 +429,24 @@ def profile(request):
         'achievements': achievements,
         'achieved_ids': achieved_ids,
         'all_achievements': all_achievements,
+        'activity': activity,
     })
+
+
+def reference(request):
+    """Страница «Справочник»: шпаргалки и глоссарий."""
+    return render(request, 'reference.html')
+
+
+@login_required
+def certificate(request):
+    """Сертификат об окончании курса."""
+    total = Lesson.objects.count()
+    completed = LessonProgress.objects.filter(user=request.user, completed_at__isnull=False).count()
+    if completed < total:
+        messages.info(request, f'Сертификат станет доступен после прохождения всех {total} уроков. Сейчас пройдено {completed}.')
+        return redirect('profile')
+    return render(request, 'certificate.html', {'completed': completed, 'total': total})
 
 
 def register(request):
