@@ -53,7 +53,7 @@ import socket
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect(("127.0.0.1", 5555))
-client.sendall(b"Привет, сервер!")
+client.sendall("Привет, сервер!".encode("utf-8"))
 answer = client.recv(1024)
 print("Ответ:", answer.decode("utf-8"))
 client.close()
