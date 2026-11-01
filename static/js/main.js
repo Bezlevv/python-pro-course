@@ -3,17 +3,20 @@
 (function () {
   'use strict';
 
-  /* --- Тема (тёмная/светлая) --- */
+  /* --- Тема (тёмная/светлая/AMOLED) --- */
   var themeToggle = document.getElementById('themeToggle');
   if (themeToggle) {
+    var THEMES = ['dark', 'light', 'amoled'];
+    var THEME_ICONS = { dark: '🌙', light: '☀️', amoled: '🕶️' };
     var applyTheme = function (theme) {
       document.documentElement.setAttribute('data-theme', theme);
-      themeToggle.textContent = theme === 'light' ? '🌙' : '☀️';
+      themeToggle.textContent = THEME_ICONS[theme] || '🌙';
     };
     var current = document.documentElement.getAttribute('data-theme') || 'dark';
     applyTheme(current);
     themeToggle.addEventListener('click', function () {
-      var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      var idx = THEMES.indexOf(document.documentElement.getAttribute('data-theme'));
+      var next = THEMES[(idx + 1) % THEMES.length];
       applyTheme(next);
       try { localStorage.setItem('pythonpro-theme', next); } catch (e) {}
     });

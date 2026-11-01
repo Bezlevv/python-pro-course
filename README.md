@@ -11,12 +11,17 @@
 - **📋 Экзамены по каждому модулю** (10 шт.): 10 вопросов, порог сдачи 80%.
 - **✅ Викторины** с автопроверкой и объяснениями.
 - **🏅 Достижения и серии** (как в Duolingo): 12 бейджей, стрик дней, «решил/прочитал» — раздельные отметки.
+- **🎚️ Уровни и лидерборд**: XP (решения + достижения), 7 уровней от Новичка до Senior, публичная таблица лидеров.
 - **💬 Комментарии** под уроками и **📝 личные заметки** с автосохранением.
+- **📖 Справочник**: шпаргалки по синтаксису, частые ошибки, команды терминала, глоссарий.
+- **🏆 Сертификат** об окончании курса (печать / сохранение в PDF).
+- **🎨 Три темы**: тёмная, светлая, AMOLED.
+- **🤖 Telegram-бот** (опционально): ежедневные напоминания, прогресс и уровень по никнейму.
 - **Поиск** с фильтрами по сложности и тегам.
 - **⬇ Скачивание примеров кода** (.py) и **экспорт прогресса** в CSV.
 - **Тёмная/светлая тема**, адаптив, кнопка «Копировать» у кода, админ-панель.
 - **Контент в Markdown**: файлы в `content/` — легко дополнять курс.
-- **Готов к продакшену**: Docker, docker-compose, Gunicorn, whitenoise, GitHub Actions CI.
+- **Готов к продакшену**: Docker, docker-compose (опционально PostgreSQL + Redis), Gunicorn, whitenoise, GitHub Actions CI, переменные окружения.
 
 ## Технологии
 
@@ -56,10 +61,21 @@ python manage.py createsuperuser
 
 ```bash
 docker compose up --build
+# полный стек (PostgreSQL + Redis):
+# docker compose --profile full up --build
 # или вручную: docker build -t pythonpro . && docker run -p 8000:8000 pythonpro
 ```
 
-Переменные окружения — см. `.env.example` (DJANGO_SECRET_KEY, DJANGO_DEBUG, DJANGO_ALLOWED_HOSTS). CI-пайплайн (тесты, валидация контента, смоук-тест) — в `.github/workflows/ci.yml`.
+Переменные окружения — см. `.env.example` (DJANGO_SECRET_KEY, DJANGO_DEBUG, DJANGO_ALLOWED_HOSTS, DJANGO_DB_ENGINE / DJANGO_REDIS_URL). CI-пайплайн (тесты, валидация контента, смоук-тест) — в `.github/workflows/ci.yml`.
+
+### Telegram-бот
+
+```bash
+set TG_BOT_TOKEN=123456:ABC...   # Windows
+python bot/telegram_bot.py
+```
+
+Команды: `/start`, `/progress <ник>`, `/level <ник>`, `/stop`. По умолчанию шлёт напоминание ежедневно в 19:00 (`TG_BOT_REMIND_HOUR`).
 
 ## Как добавить урок
 
