@@ -19,6 +19,7 @@ urlpatterns = [
     path('reference/', views.reference, name='reference'),
     path('leaderboard/', views.leaderboard, name='leaderboard'),
     path('certificate/', views.certificate, name='certificate'),
+    path('certificate/pdf/', views.certificate_pdf, name='certificate_pdf'),
     path('profile/', views.profile, name='profile'),
     path('profile/export/', views.export_progress, name='export_progress'),
     path('register/', views.register, name='register'),

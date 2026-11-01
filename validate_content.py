@@ -89,8 +89,8 @@ def main():
                 errors.append(f'{path}: разборы слишком короткие ({solution_words} слов < {MIN_SOLUTION_WORDS})')
             if tasks_count < 5:
                 errors.append(f'{path}: задач должно быть не меньше 5 (сейчас {tasks_count})')
-            if quizzes_count < 5:
-                errors.append(f'{path}: вопросов викторины должно быть не меньше 5 (сейчас {quizzes_count})')
+            if quizzes_count < 8:
+                errors.append(f'{path}: вопросов викторины должно быть не меньше 8 (сейчас {quizzes_count})')
 
     print(f'Уроков проверено: {total_lessons}')
     if errors:

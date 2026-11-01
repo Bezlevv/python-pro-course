@@ -518,13 +518,69 @@ def leaderboard(request):
 
 @login_required
 def certificate(request):
-    """Сертификат об окончании курса."""
+    """Сертификат об окончании курса (страница)."""
     total = Lesson.objects.count()
     completed = LessonProgress.objects.filter(user=request.user, completed_at__isnull=False).count()
     if completed < total:
         messages.info(request, f'Сертификат станет доступен после прохождения всех {total} уроков. Сейчас пройдено {completed}.')
         return redirect('profile')
     return render(request, 'certificate.html', {'completed': completed, 'total': total})
+
+
+@login_required
+def certificate_pdf(request):
+    """Сертификат об окончании курса (PDF)."""
+    from datetime import date
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdf_canvas
+
+    total = Lesson.objects.count()
+    completed = LessonProgress.objects.filter(user=request.user, completed_at__isnull=False).count()
+    if completed < total:
+        messages.info(request, f'Сертификат станет доступен после прохождения всех {total} уроков. Сейчас пройдено {completed}.')
+        return redirect('profile')
+
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="pythonpro_certificate.pdf"'
+
+    width, height = landscape(A4)
+    c = pdf_canvas.Canvas(response, pagesize=landscape(A4))
+
+    # Рамка
+    c.setStrokeColor(colors.HexColor('#7c5cff'))
+    c.setLineWidth(2.5)
+    c.rect(14 * mm, 14 * mm, width - 28 * mm, height - 28 * mm)
+    c.setStrokeColor(colors.HexColor('#22d3ee'))
+    c.setLineWidth(0.75)
+    c.rect(17 * mm, 17 * mm, width - 34 * mm, height - 34 * mm)
+
+    c.setFillColor(colors.HexColor('#1a2130'))
+    c.setFont('Helvetica-Bold', 44)
+    c.drawCentredString(width / 2, height - 45 * mm, 'СЕРТИФИКАТ')
+
+    c.setFont('Helvetica', 15)
+    c.setFillColor(colors.HexColor('#4a5a78'))
+    c.drawCentredString(width / 2, height - 54 * mm, 'подтверждает успешное прохождение курса')
+
+    c.setFillColor(colors.HexColor('#7c5cff'))
+    c.setFont('Helvetica-Bold', 34)
+    c.drawCentredString(width / 2, height - 70 * mm, request.user.username)
+
+    c.setFillColor(colors.HexColor('#222b3d'))
+    c.setFont('Helvetica', 15)
+    c.drawCentredString(width / 2, height - 82 * mm,
+                        f'прошёл(ла) все {total} уроков курса «PythonПро» — от основ языка до продвинутых тем, проектов и деплоя.')
+
+    c.setFont('Helvetica', 13)
+    c.setFillColor(colors.HexColor('#4a5a78'))
+    c.drawCentredString(width / 2, 32 * mm, f'Дата: {date.today().strftime("%d.%m.%Y")}')
+    c.drawCentredString(width / 2, 24 * mm, 'PythonПро')
+    c.showPage()
+    c.save()
+    return response
 
 
 def register(request):

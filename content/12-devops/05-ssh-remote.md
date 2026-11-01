@@ -300,4 +300,18 @@ AuthenticationException сигнализирует о проблемах аут�
 - Код возврата
 * Правильный ответ: Три потока: stdin, stdout, stderr
 Распаковка: stdin, stdout, stderr = client.exec_command("cmd").
+
+Какой метод SFTP загружает файл на сервер?
+- sftp.put()
+- sftp.get()
+- sftp.send()
+* Правильный ответ: sftp.put()
+put(local, remote) загружает локальный файл на сервер; get — скачивает.
+
+Какое исключение бросит paramiko при недоступном сервере (таймаут)?
+- TimeoutError
+- paramiko.AuthenticationException
+- FileNotFoundError
+* Правильный ответ: TimeoutError
+Если сервер не отвечает за отведённое время, возникает TimeoutError.
 <!--/QUIZ-->

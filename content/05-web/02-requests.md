@@ -330,4 +330,20 @@ print(f"Выполнено: {len(completed)} из {len(todos)}")
 - Ничего не произойдёт
 * Правильный ответ: Библиотека сама сериализует словарь в JSON и выставит Content-Type: application/json
 Поэтому для API предпочитают json=, а не data=.
+
+Какой метод requests отправляет данные в формате формы?
+- requests.post(url, data={...})
+- requests.post(url, json={...})
+- requests.get(url, params={...})
+- requests.put(url, files={...})
+* Правильный ответ: requests.post(url, data={...})
+Аргумент data= отправляет данные как application/x-www-form-urlencoded, а json= — как JSON.
+
+Что хранится в свойстве r.status_code?
+- Текст тела ответа
+- Числовой код статуса HTTP-ответа
+- Список заголовков
+- Версия библиотеки requests
+* Правильный ответ: Числовой код статуса HTTP-ответа
+Например, 200 — успех, 404 — страница не найдена, 500 — ошибка сервера.
 <!--/QUIZ-->

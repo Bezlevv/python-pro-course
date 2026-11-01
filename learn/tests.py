@@ -270,6 +270,14 @@ class ViewTests(TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn(reverse('profile'), r.url)
 
+    def test_certificate_pdf_when_complete(self):
+        self.client.login(username='stud', password='pass12345')
+        for lesson in Lesson.objects.all():
+            LessonProgress.objects.create(user=self.user, lesson=lesson)
+        r = self.client.get(reverse('certificate_pdf'))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('application/pdf', r['Content-Type'])
+
     def test_leaderboard_ok(self):
         r = self.client.get(reverse('leaderboard'))
         self.assertEqual(r.status_code, 200)

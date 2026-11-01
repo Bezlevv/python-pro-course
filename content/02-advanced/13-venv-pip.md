@@ -332,4 +332,19 @@ dir
 - pip uninstall venv
 * Правильный ответ: deactivate
 Команда deactivate возвращает системный Python и pip.
+Как установить конкретную версию пакета?
+- pip install requests latest
+- pip install requests==2.31.0
+- pip install requests до 2.31.0
+- pip install requests --version 2.31.0
+* Правильный ответ: pip install requests==2.31.0
+Двойное равно фиксирует точную версию пакета.
+
+Куда попадают пакеты, установленные внутри окружения?
+- В системный Python
+- В папку site-packages внутри .venv
+- В текущую рабочую папку
+- В корень диска
+* Правильный ответ: В папку site-packages внутри .venv
+Пакеты ставятся только в окружение, оставляя системный Python нетронутым.
 <!--/QUIZ-->

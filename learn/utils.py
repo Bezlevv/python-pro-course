@@ -97,8 +97,29 @@ def parse_quiz(text):
         return questions
     # Убираем возможные строки-маркеры блока
     lines_all = [ln for ln in text.splitlines() if ln.strip() not in ('<!--QUIZ-->', '<!--/QUIZ-->')]
-    text = '\n'.join(lines_all)
-    groups = re.split(r'\n\s*\n', text.strip())
+
+    # Авторазделение вопросов: вопрос может начинаться и без пустой строки
+    def _question_line(line):
+        line = line.strip()
+        if not line or line.startswith(('- ', '*')):
+            return False
+        if line.endswith('?') and len(line) > 4:
+            return True
+        return bool(re.match(
+            r'^(?:Что|Как|Какой|Какая|Какие|Почему|Зачем|Сколько|Где|Когда|Можно ли|'
+            r'Верно ли|Каким|Насколько|Что будет|Что выведет|Что произойдёт|Что вернёт|'
+            r'Что делает|Что такое|Из чего|Чем отличается|Как работает|Как создать|Как получить|'
+            r'Как удалить|Где хранится|Зачем нужен|Сколько раз)', line, re.I))
+
+    normalized = []
+    prev = None
+    for line in lines_all:
+        if (prev is not None and prev.strip() and not prev.strip().startswith(('- ', '*'))
+                and _question_line(line) and not line.strip().startswith(('- ', '*'))):
+            normalized.append('')
+        normalized.append(line)
+        prev = line
+    groups = re.split(r'\n\s*\n', '\n'.join(normalized).strip())
     for group in groups:
         lines = [line.strip() for line in group.splitlines() if line.strip()]
         if not lines:

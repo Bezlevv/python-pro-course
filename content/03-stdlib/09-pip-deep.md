@@ -415,4 +415,20 @@ pipx изолирует каждую утилиту, чтобы её завис�
 - pip install -s https://mirror.example.com requests
 * Правильный ответ: pip install -i https://mirror.example.com/pypi/simple requests
 Флаг -i (--index-url) указывает pip, откуда брать пакеты вместо PyPI.
+
+Что делает pip uninstall requests?
+- Удаляет пакет requests из окружения
+- Удаляет все зависимости проекта
+- Обновляет requests до последней версии
+- Выводит информацию о пакете
+* Правильный ответ: Удаляет пакет requests из окружения
+pip uninstall удаляет пакет и его файлы, но не трогает зависимости, если их не указали отдельно.
+
+Какая команда показывает подробную информацию об установленном пакете?
+- pip show requests
+- pip info requests
+- pip describe requests
+- pip details requests
+* Правильный ответ: pip show requests
+pip show выводит версию, лицензию, зависимости, ссылки на сайт и место установки пакета.
 <!--/QUIZ-->
