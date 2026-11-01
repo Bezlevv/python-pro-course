@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Поиск по курсу — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>Поиск по курсу</h1>
+    <form class="search-form" action="{% url 'search' %}" method="get">
+      <input type="search" name="q" value="{{ q }}" placeholder="Например: декораторы, словари, Flask…" autofocus>
+      <button class="btn btn-primary" type="submit">Найти</button>
+    </form>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    {% if q %}
+      {% if results %}
+        <p class="muted">Найдено: {{ results|length }} уроков по запросу «{{ q }}»</p>
+        <div class="list-cards">
+          {% for lesson in results %}
+            <a class="card row-card" href="{{ lesson.get_absolute_url }}">
+              <span class="row-icon">{{ lesson.module.icon }}</span>
+              <div class="row-text">
+                <div class="row-title">{{ lesson.title }}</div>
+                <div class="row-sub">{{ lesson.module.title }} · {{ lesson.duration }} · {{ lesson.summary|truncatechars:80 }}</div>
+              </div>
+              <span class="row-arrow">→</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert">По запросу «{{ q }}» ничего не найдено. Попробуйте другое слово.</div>
+      {% endif %}
+    {% else %}
+      <p class="muted">Введите слово или фразу — найдём уроки по названию, описанию и тексту теории.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

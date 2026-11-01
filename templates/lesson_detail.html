@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}{{ lesson.title }} — PythonПро{% endblock %}
+
+{% block content %}
+<div class="lesson-page">
+  <div class="container">
+    <nav class="breadcrumbs">
+      <a href="{% url 'modules' %}">Курс</a> <span>/</span>
+      <a href="{{ lesson.module.get_absolute_url }}">{{ lesson.module.title }}</a> <span>/</span>
+      <span>{{ lesson.title|truncatechars:40 }}</span>
+    </nav>
+
+    <div class="lesson-layout">
+      <aside class="lesson-aside">
+        <div class="card aside-card">
+          <div class="aside-module">{{ lesson.module.icon }} {{ lesson.module.title }}</div>
+          <ol class="lesson-nav">
+            {% for l in module_lessons %}
+              <li class="{% if l.id == lesson.id %}active{% endif %} {% if l.id in done_ids %}is-done{% endif %}">
+                <a href="{{ l.get_absolute_url }}">
+                  <span class="l-num">{{ forloop.counter }}</span>
+                  <span class="l-title">{{ l.title }}</span>
+                  {% if l.id in done_ids %}<span class="l-tick">✓</span>{% endif %}
+                </a>
+              </li>
+            {% endfor %}
+          </ol>
+        </div>
+        <div class="card aside-progress">
+          <div class="aside-progress-title">Прогресс модуля</div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width: {{ module_pct }}%"></div>
+          </div>
+          <div class="aside-progress-num">{{ module_done }}/{{ module_lessons|length }} пройдено</div>
+        </div>
+      </aside>
+
+      <article class="lesson-main">
+        <header class="lesson-head">
+          <div class="chips">
+            <span class="chip">Модуль {{ lesson.module.order }}</span>
+            <span class="chip chip-diff chip-{{ lesson.difficulty }}">{{ difficulty_label }}</span>
+            <span class="chip">⏱ {{ lesson.duration }}</span>
+            {% if is_done %}<span class="chip chip-done">✓ пройден</span>{% endif %}
+          </div>
+          <h1>{{ lesson.title }}</h1>
+          {% if lesson.summary %}<p class="lead muted">{{ lesson.summary }}</p>{% endif %}
+        </header>
+
+        {% if theory_html %}
+          <section class="content-block">
+            <h2 class="block-title">📖 Теория</h2>
+            <div class="md-body">{{ theory_html|safe }}</div>
+          </section>
+        {% endif %}
+
+        {% if task_html %}
+          <section class="content-block task-block">
+            <h2 class="block-title">🎯 Задача</h2>
+            <div class="md-body">{{ task_html|safe }}</div>
+
+            {% if hint_html %}
+              <details class="hint">
+                <summary>💡 Подсказка</summary>
+                <div class="md-body">{{ hint_html|safe }}</div>
+              </details>
+            {% endif %}
+
+            {% if solution_html %}
+              <details class="solution">
+                <summary>🔓 Разбор и решение</summary>
+                <div class="md-body">{{ solution_html|safe }}</div>
+              </details>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        <div class="lesson-done">
+          {% if user.is_authenticated %}
+            <form method="post" action="{% url 'complete_lesson' lesson.id %}">
+              {% csrf_token %}
+              <button type="submit" class="btn {% if is_done %}btn-ghost{% else %}btn-primary{% endif %} btn-lg">
+                {% if is_done %}Убрать отметку «пройден»{% else %}Задача решена — отметить ✓{% endif %}
+              </button>
+            </form>
+          {% else %}
+            <a class="btn btn-primary btn-lg" href="{% url 'login' %}?next={{ lesson.get_absolute_url|urlencode }}">
+              Войти, чтобы отмечать прогресс
+            </a>
+          {% endif %}
+        </div>
+
+        <nav class="lesson-pager">
+          {% if prev_lesson %}
+            <a class="btn btn-ghost" href="{{ prev_lesson.get_absolute_url }}">← {{ prev_lesson.title|truncatechars:44 }}</a>
+          {% else %}
+            <span></span>
+          {% endif %}
+          {% if next_lesson %}
+            <a class="btn btn-primary" href="{{ next_lesson.get_absolute_url }}">{{ next_lesson.title|truncatechars:44 }} →</a>
+          {% else %}
+            <span></span>
+          {% endif %}
+        </nav>
+      </article>
+    </div>
+  </div>
+</div>
+{% endblock %}

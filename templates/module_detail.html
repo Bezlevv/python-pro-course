@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}{{ module.title }} — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <nav class="breadcrumbs">
+      <a href="{% url 'modules' %}">Курс</a> <span>/</span>
+      <span>Модуль {{ module.order }}</span>
+    </nav>
+    <div class="module-head">
+      <span class="module-icon big">{{ module.icon }}</span>
+      <div>
+        <h1>{{ module.title }}</h1>
+        {% if module.description %}<p class="lead muted">{{ module.description }}</p>{% endif %}
+      </div>
+    </div>
+    <div class="module-stats">
+      <span class="chip">{{ lessons|length }} уроков</span>
+      {% if user.is_authenticated %}
+        <span class="chip">{{ done_count }} пройдено</span>
+      {% endif %}
+    </div>
+    {% if user.is_authenticated %}
+      <div class="progress-track">
+        <div class="progress-fill" style="width: {{ pct }}%"></div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="lesson-list card">
+      {% for lesson in lessons %}
+        <a class="lesson-row {% if lesson.id in done_ids %}done{% endif %}" href="{{ lesson.get_absolute_url }}">
+          <span class="lesson-num">{{ forloop.counter }}</span>
+          <div class="lesson-info">
+            <div class="lesson-title">{{ lesson.title }}</div>
+            {% if lesson.summary %}<div class="lesson-summary">{{ lesson.summary }}</div>{% endif %}
+            <div class="lesson-chips">
+              <span class="chip chip-diff chip-{{ lesson.difficulty }}">
+                {% if lesson.difficulty == 'beginner' %}Начинающий{% elif lesson.difficulty == 'intermediate' %}Средний{% else %}Продвинутый{% endif %}
+              </span>
+              <span class="chip">⏱ {{ lesson.duration }}</span>
+              {% if lesson.id in done_ids %}<span class="chip chip-done">✓ пройден</span>{% endif %}
+            </div>
+          </div>
+          <span class="row-arrow">→</span>
+        </a>
+      {% empty %}
+        <div class="alert">Уроки этого модуля пока загружаются.</div>
+      {% endfor %}
+    </div>
+    <div class="module-nav" style="margin-top: 24px;">
+      {% comment %}Ссылка на первый урок модуля{% endcomment %}
+    </div>
+  </div>
+</section>
+{% endblock %}

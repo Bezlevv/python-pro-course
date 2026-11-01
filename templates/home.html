@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}PythonПро — курс Python с нуля до Senior{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="hero-text">
+        <span class="chip chip-accent">Полный курс · от нуля до Senior</span>
+        <h1>Выучи <span class="grad">Python</span><br>от нуля до Senior</h1>
+        <p class="lead">
+          Подробная теория, живые примеры и задачи с подсказками и разборами.
+          От объявления переменных — до нейросетей, веб-приложений и собственных проектов.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="{% url 'modules' %}">Начать учиться →</a>
+          <a class="btn btn-ghost btn-lg" href="#structure">Как устроен курс</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>{{ total_lessons }}</b><span>уроков</span></div>
+          <div class="stat"><b>7</b><span>модулей</span></div>
+          <div class="stat"><b>6</b><span>готовых проектов</span></div>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="terminal-card">
+          <div class="terminal-head">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="terminal-title">python — путь от 0</span>
+          </div>
+          <pre class="terminal-body"><code><span class="c1"># Модуль 1. Основы</span>
+<span class="c2">name</span> = <span class="c3">"Аня"</span>
+<span class="c2">age</span> = <span class="c4">21</span>
+
+<span class="c2">print</span>(<span class="c3">f"Привет, {name}!"</span>)
+<span class="c1"># Привет, Аня!</span>
+
+<span class="c2">def</span> <span class="c5">senior</span>():
+    <span class="c2">return</span> <span class="c3">"ты уже Senior 🚀"</span></code></pre>
+          <div class="terminal-foot">
+            <span>🔥 62 урока</span><span>🧠 теория</span><span>🎯 практика</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="structure">
+  <div class="container">
+    <div class="section-head">
+      <h2>Путь обучения</h2>
+      <p class="muted">Семь модулей — от азов до больших проектов. Модули идут по нарастающей сложности, но заглядывать в любой можно в любой момент.</p>
+    </div>
+    {% if user.is_authenticated %}
+      <div class="overall-progress">
+        <div class="overall-label">Мой прогресс по курсу</div>
+        <div class="progress-track big">
+          <div class="progress-fill" style="width: {{ completed_pct }}%"></div>
+        </div>
+        <div class="overall-num">{{ completed }} из {{ total_lessons }} уроков ({{ completed_pct }}%)</div>
+      </div>
+    {% endif %}
+    <div class="module-grid">
+      {% for item in modules_data %}
+        <a class="module-card" href="{{ item.module.get_absolute_url }}">
+          <div class="module-top">
+            <span class="module-icon">{{ item.module.icon }}</span>
+            <span class="chip">Модуль {{ item.module.order }}</span>
+          </div>
+          <h3>{{ item.module.title }}</h3>
+          <p>{{ item.module.description|truncatechars:120 }}</p>
+          <div class="module-meta">
+            <span>{{ item.total }} уроков</span>
+            {% if user.is_authenticated %}
+              <span class="progress-num">{{ item.done }}/{{ item.total }}</span>
+            {% endif %}
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width: {{ item.pct }}%"></div>
+          </div>
+        </a>
+      {% empty %}
+        <div class="alert">Контент курса ещё загружается — загляните чуть позже.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="section section-alt">
+  <div class="container">
+    <div class="two-col">
+      <div>
+        <h2>Почему так устроено</h2>
+        <ul class="feature-list">
+          <li><b>📖 Теория</b> — коротко, но без воды: каждое понятие объясняется на примере.</li>
+          <li><b>🎯 Практика</b> — после каждой темы задача, которую нужно решить самому.</li>
+          <li><b>💡 Подсказки</b> — если застрял, есть подсказка: направление, а не готовый ответ.</li>
+          <li><b>🔓 Разборы</b> — честное полное решение с объяснением каждого шага.</li>
+          <li><b>🛠️ Проекты</b> — делаем настоящие вещи: игры, сайты, API, дашборды, нейросети.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Что внутри</h2>
+        <div class="tag-cloud">
+          <span class="chip">переменные</span><span class="chip">циклы</span><span class="chip">функции</span>
+          <span class="chip">ООП</span><span class="chip">декораторы</span><span class="chip">генераторы</span>
+          <span class="chip">pandas</span><span class="chip">matplotlib</span><span class="chip">Flask</span>
+          <span class="chip">FastAPI</span><span class="chip">Django</span><span class="chip">Streamlit</span>
+          <span class="chip">SQL</span><span class="chip">async</span><span class="chip">PyTorch</span>
+          <span class="chip">нейросети</span><span class="chip">Git</span><span class="chip">pytest</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if recent %}
+<section class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>Недавно добавленное</h2>
+      <a class="link-more" href="{% url 'modules' %}">Весь курс →</a>
+    </div>
+    <div class="list-cards">
+      {% for lesson in recent %}
+        <a class="card row-card" href="{{ lesson.get_absolute_url }}">
+          <span class="row-icon">{{ lesson.module.icon }}</span>
+          <div class="row-text">
+            <div class="row-title">{{ lesson.title }}</div>
+            <div class="row-sub">{{ lesson.module.title }} · {{ lesson.duration }}</div>
+          </div>
+          <span class="row-arrow">→</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section class="section cta-section">
+  <div class="container cta-card">
+    <h2>Готов начать?</h2>
+    <p class="muted">Открой первый модуль и напиши первую программу уже через пять минут.</p>
+    <a class="btn btn-primary btn-lg" href="{% url 'modules' %}">К курсу →</a>
+  </div>
+</section>
+{% endblock %}

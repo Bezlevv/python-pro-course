@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Страница не найдена — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>404</h1>
+    <p class="lead muted">Такой страницы нет. Но курс никуда не делся 😉</p>
+    <a class="btn btn-primary" href="{% url 'modules' %}">К курсу</a>
+  </div>
+</section>
+{% endblock %}

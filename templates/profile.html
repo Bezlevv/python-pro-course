@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Мой прогресс — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>Мой прогресс</h1>
+    <p class="lead muted">{{ user.username }}, ты прошёл {{ completed }} из {{ total_lessons }} уроков ({{ pct_total }}%)</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="stats">
+      <div class="stat"><b>{{ completed }}</b><span>уроков пройдено</span></div>
+      <div class="stat"><b>{{ pct_total }}%</b><span>курса</span></div>
+      <div class="stat"><b>{{ data|length }}</b><span>модулей</span></div>
+    </div>
+
+    <div class="profile-modules">
+      {% for item in data %}
+        <div class="card profile-module">
+          <div class="profile-module-head">
+            <span class="module-icon">{{ item.module.icon }}</span>
+            <div>
+              <div class="profile-module-title"><a href="{{ item.module.get_absolute_url }}">{{ item.module.title }}</a></div>
+              <div class="muted">{{ item.done }} из {{ item.total }} уроков</div>
+            </div>
+            <b class="profile-module-pct">{{ item.pct }}%</b>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width: {{ item.pct }}%"></div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    {% if last_done %}
+      <div class="section-head" style="margin-top: 40px;">
+        <h2>Недавно пройдено</h2>
+      </div>
+      <div class="list-cards">
+        {% for p in last_done %}
+          <a class="card row-card" href="{{ p.lesson.get_absolute_url }}">
+            <span class="row-icon">{{ p.lesson.module.icon }}</span>
+            <div class="row-text">
+              <div class="row-title">{{ p.lesson.title }}</div>
+              <div class="row-sub">{{ p.lesson.module.title }} · {{ p.completed_at|date:"d.m.Y H:i" }}</div>
+            </div>
+            <span class="row-arrow">→</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

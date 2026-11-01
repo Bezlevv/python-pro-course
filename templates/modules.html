@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Курс — PythonПро{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="container">
+    <h1>Курс по Python</h1>
+    <p class="lead muted">Все модули по порядку. Прогресс сохраняется в вашем аккаунте.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="module-grid">
+      {% for item in modules_data %}
+        <a class="module-card" href="{{ item.module.get_absolute_url }}">
+          <div class="module-top">
+            <span class="module-icon">{{ item.module.icon }}</span>
+            <span class="chip">Модуль {{ item.module.order }}</span>
+          </div>
+          <h3>{{ item.module.title }}</h3>
+          <p>{{ item.module.description|truncatechars:120 }}</p>
+          <div class="module-meta">
+            <span>{{ item.total }} уроков</span>
+            {% if user.is_authenticated %}
+              <span class="progress-num">{{ item.done }}/{{ item.total }}</span>
+            {% endif %}
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" style="width: {{ item.pct }}%"></div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}
