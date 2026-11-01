@@ -42,6 +42,17 @@ class QuizParserTests(TestCase):
         self.assertEqual(parse_quiz(''), [])
         self.assertEqual(parse_quiz('   '), [])
 
+    def test_questions_without_blank_lines(self):
+        md = (
+            'Что выведет print(2 ** 3)?\n'
+            '- 6\n- 8\n* Правильный ответ: 8\nОбъяснение 1\n'
+            'Какой тип у 7 / 2?\n'
+            '- int\n- float\n* Правильный ответ: float\nОбъяснение 2'
+        )
+        questions = parse_quiz(md)
+        self.assertEqual(len(questions), 2)
+        self.assertEqual(questions[1]['correct_index'], 1)
+
 
 class SandboxTests(TestCase):
     def test_basic_code_runs(self):
@@ -157,6 +168,50 @@ class LevelTests(TestCase):
         lesson = Lesson.objects.create(module=module, slug='l-lvl', title='Урок', order=1)
         LessonProgress.objects.create(user=user, lesson=lesson)
         self.assertEqual(xp_for_user(user), 100)
+
+
+class JourneyTests(TestCase):
+    """Сквозной сценарий: регистрация → учёба → сертификат."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.module = Module.objects.create(slug='j1', title='М', order=50)
+        cls.lesson = Lesson.objects.create(
+            module=cls.module, slug='jl1', title='Урок', order=1,
+            theory_md='Теория', task_md='### Задача 1\nЗадача',
+            hint_md='### Подсказка 1\nПодсказка',
+            solution_md='### Разбор 1\nРазбор',
+            quiz_md=QUIZ_SAMPLE,
+        )
+
+    def test_full_student_journey(self):
+        r = self.client.post(reverse('register'), {
+            'username': 'newbie',
+            'password1': 'pass12345!',
+            'password2': 'pass12345!',
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(self.client.login(username='newbie', password='pass12345!'))
+
+        r = self.client.get(self.lesson.get_absolute_url())
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Викторина')
+
+        r = self.client.post(reverse('complete_lesson', args=[self.lesson.id]))
+        self.assertEqual(r.status_code, 302)
+
+        r = self.client.get(reverse('profile'))
+        self.assertContains(r, '🐣 Новичок')
+        self.assertContains(r, 'Достижения')
+
+        r = self.client.get(reverse('leaderboard'))
+        self.assertContains(r, 'newbie')
+
+        r = self.client.get(reverse('certificate'))
+        self.assertEqual(r.status_code, 200)
+        r = self.client.get(reverse('certificate_pdf'))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('application/pdf', r['Content-Type'])
 
 
 class ViewTests(TestCase):
