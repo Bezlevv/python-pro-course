@@ -453,6 +453,27 @@ def profile(request):
     for i in range(14):
         d = start + timedelta(days=i)
         activity.append((d.strftime('%d.%m'), day_counts.get(d, 0)))
+    # Тепловая карта за год (недели × дни)
+    year_start = date.today() - timedelta(days=364)
+    counts = {}
+    for p in done:
+        d = p.completed_at.date()
+        if d >= year_start:
+            counts[d] = counts.get(d, 0) + 1
+    monday = year_start - timedelta(days=year_start.weekday())
+    weeks = []
+    today = date.today()
+    cur = monday
+    while cur <= today:
+        week = []
+        for i in range(7):
+            d = cur + timedelta(days=i)
+            if d < year_start or d > today:
+                week.append(None)
+            else:
+                week.append((d, counts.get(d, 0)))
+        weeks.append(week)
+        cur += timedelta(days=7)
     achievements = (
         UserAchievement.objects.filter(user=request.user)
         .select_related('achievement').order_by('achievement__order')
@@ -471,6 +492,7 @@ def profile(request):
         'achieved_ids': achieved_ids,
         'all_achievements': all_achievements,
         'activity': activity,
+        'heat': weeks,
         'xp': user_xp,
         'level': level_info(user_xp),
     })

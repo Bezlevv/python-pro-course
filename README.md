@@ -28,7 +28,7 @@
 - Backend: **Django 5** + SQLite (+ Gunicorn/whitenoise для продакшена)
 - Рендер уроков: **Markdown** (python-markdown)
 - Фронтенд: чистый HTML/CSS/JS (без внешних CDN)
-- Внутри курса изучаются: Flask, FastAPI, Django, Jinja2, Streamlit, pandas, NumPy, Matplotlib, scikit-learn, PyTorch, BeautifulSoup, SQLAlchemy, Docker, GitHub Actions, pytest, Git и др.
+- Внутри курса изучаются: Flask, FastAPI, Django, Jinja2, Streamlit, pandas, NumPy, Matplotlib, scikit-learn, PyTorch, BeautifulSoup, SQLAlchemy, Docker, GitHub Actions, pytest, Git, **uv** и др.
 
 ## Быстрый старт
 

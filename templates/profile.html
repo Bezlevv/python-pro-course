@@ -58,6 +58,28 @@
       </div>
     {% endif %}
 
+    {% if heat %}
+      <div class="heat-block">
+        <div class="section-head" style="margin-top: 36px;">
+          <h2>Активность за год</h2>
+          <p class="muted">Тепловая карта решённых уроков. Чем ярче клетка, тем больше занятий в этот день.</p>
+        </div>
+        <div class="heat-grid">
+          {% for week in heat %}
+            <div class="heat-week">
+              {% for cell in week %}
+                {% if cell %}
+                  <div class="heat-cell" style="--a: {{ cell.1 }};" title="{{ cell.0|date:"d.m.Y" }}: {{ cell.1 }} уроков"></div>
+                {% else %}
+                  <div class="heat-cell empty"></div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
     <div class="section-head" style="margin-top: 36px;">
       <h2>Достижения</h2>
       <p class="muted">Их можно получить, решая уроки и занимаясь регулярно.</p>

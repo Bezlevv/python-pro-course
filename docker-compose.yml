@@ -34,5 +34,15 @@ services:
     image: redis:7
     profiles: ["full"]
 
+  bot:
+    build: .
+    profiles: ["full"]
+    environment:
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      DJANGO_DB_ENGINE: ${DJANGO_DB_ENGINE:-sqlite}
+      DJANGO_DB_HOST: db
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+    command: python bot/telegram_bot.py
+
 volumes:
   pgdata:
