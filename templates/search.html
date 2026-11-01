@@ -6,7 +6,19 @@
   <div class="container">
     <h1>Поиск по курсу</h1>
     <form class="search-form" action="{% url 'search' %}" method="get">
-      <input type="search" name="q" value="{{ q }}" placeholder="Например: декораторы, словари, Flask…" autofocus>
+      <input type="search" name="q" value="{{ q }}" placeholder="Например: декораторы, Docker, pandas…" autofocus>
+      <select name="difficulty" class="filter-select">
+        <option value="">Любая сложность</option>
+        <option value="beginner" {% if difficulty == 'beginner' %}selected{% endif %}>Начинающий</option>
+        <option value="intermediate" {% if difficulty == 'intermediate' %}selected{% endif %}>Средний</option>
+        <option value="advanced" {% if difficulty == 'advanced' %}selected{% endif %}>Продвинутый</option>
+      </select>
+      <select name="tag" class="filter-select">
+        <option value="">Все теги</option>
+        {% for t in all_tags %}
+          <option value="{{ t }}" {% if tag == t %}selected{% endif %}>#{{ t }}</option>
+        {% endfor %}
+      </select>
       <button class="btn btn-primary" type="submit">Найти</button>
     </form>
   </div>
@@ -14,26 +26,30 @@
 
 <section class="section">
   <div class="container">
-    {% if q %}
+    {% if q or difficulty or tag %}
       {% if results %}
-        <p class="muted">Найдено: {{ results|length }} уроков по запросу «{{ q }}»</p>
+        <p class="muted">Найдено: {{ results|length }} уроков.</p>
         <div class="list-cards">
           {% for lesson in results %}
             <a class="card row-card" href="{{ lesson.get_absolute_url }}">
               <span class="row-icon">{{ lesson.module.icon }}</span>
               <div class="row-text">
                 <div class="row-title">{{ lesson.title }}</div>
-                <div class="row-sub">{{ lesson.module.title }} · {{ lesson.duration }} · {{ lesson.summary|truncatechars:80 }}</div>
+                <div class="row-sub">
+                  {{ lesson.module.title }} · {{ lesson.duration }} ·
+                  {% if lesson.difficulty == 'beginner' %}Начинающий{% elif lesson.difficulty == 'intermediate' %}Средний{% else %}Продвинутый{% endif %}
+                  · {{ lesson.summary|truncatechars:70 }}
+                </div>
               </div>
               <span class="row-arrow">→</span>
             </a>
           {% endfor %}
         </div>
       {% else %}
-        <div class="alert">По запросу «{{ q }}» ничего не найдено. Попробуйте другое слово.</div>
+        <div class="alert">Ничего не найдено. Попробуй другие слова или фильтры.</div>
       {% endif %}
     {% else %}
-      <p class="muted">Введите слово или фразу — найдём уроки по названию, описанию и тексту теории.</p>
+      <p class="muted">Введите слово или фразу — найдём уроки по названию, описанию и тексту теории. Можно отфильтровать по сложности и тегам.</p>
     {% endif %}
   </div>
 </section>

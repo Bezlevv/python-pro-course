@@ -11,8 +11,8 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
-from learn.models import Lesson, Module
-from learn.utils import FRONT_MATTER_RE, parse_lesson_file
+from learn.models import Lesson, Module, QuizQuestion
+from learn.utils import FRONT_MATTER_RE, parse_lesson_file, parse_quiz
 
 CONTENT_DIR = Path(__file__).resolve().parent.parent.parent.parent / 'content'
 
@@ -31,6 +31,20 @@ def parse_module_meta(text):
         if key in {'title', 'order', 'description', 'icon', 'summary'}:
             meta[key] = value.strip()
     return meta
+
+
+def _sync_quizzes(lesson, quiz_md):
+    """Синхронизирует вопросы викторины урока с содержимым quiz_md."""
+    lesson.quizzes.all().delete()
+    for idx, q in enumerate(parse_quiz(quiz_md), start=1):
+        QuizQuestion.objects.create(
+            lesson=lesson,
+            order=idx,
+            question=q['question'],
+            options=q['options'],
+            correct_index=q['correct_index'],
+            explanation=q['explanation'],
+        )
 
 
 class Command(BaseCommand):
@@ -89,12 +103,16 @@ class Command(BaseCommand):
                         'summary': data.get('summary', ''),
                         'duration': data.get('duration', '20 мин'),
                         'difficulty': data.get('difficulty', 'beginner'),
+                        'tags': data.get('tags', ''),
                         'theory_md': data['theory_md'],
                         'task_md': data['task_md'],
                         'hint_md': data['hint_md'],
                         'solution_md': data['solution_md'],
+                        'quiz_md': data['quiz_md'],
+                        'expected_output_md': data['expected_output_md'],
                     },
                 )
+                _sync_quizzes(lesson, data['quiz_md'])
                 if created:
                     lessons_created += 1
                 else:

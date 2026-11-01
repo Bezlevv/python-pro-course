@@ -1,0 +1,18 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_SECRET_KEY: "change-me-to-a-long-random-string"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+    # Для постоянного хранения данных лучше подключить PostgreSQL:
+    #   services:
+    #     db: image: postgres:17, environment: POSTGRES_*,
+    #     web: environment: DJANGO_DB_ENGINE=postgresql, ... depends_on: [db]
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py load_content &&
+             python manage.py seed_achievements &&
+             gunicorn --bind 0.0.0.0:8000 --workers 3 courseproj.wsgi:application"

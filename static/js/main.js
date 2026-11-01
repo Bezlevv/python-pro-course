@@ -71,4 +71,115 @@
   }
 
   document.addEventListener('DOMContentLoaded', addCopyButtons);
+
+  /* --- CSRF --- */
+  function getCsrf() {
+    var el = document.querySelector('input[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+  }
+
+  function postJSON(url, data) {
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCsrf()
+      },
+      body: JSON.stringify(data)
+    }).then(function (r) { return r.json(); });
+  }
+
+  /* --- Песочница --- */
+  var runBtn = document.getElementById('sandboxRun');
+  if (runBtn) {
+    runBtn.addEventListener('click', function () {
+      var codeEl = document.getElementById('sandboxCode');
+      var outEl = document.getElementById('sandboxOutput');
+      var statusEl = document.getElementById('sandboxStatus');
+      var url = runBtn.dataset.url;
+      if (!codeEl || !outEl) return;
+      if (!url) return;
+      outEl.classList.add('hidden');
+      outEl.classList.remove('error');
+      statusEl.textContent = 'Выполняется…';
+      runBtn.disabled = true;
+      postJSON(url, { code: codeEl.value }).then(function (res) {
+        runBtn.disabled = false;
+        statusEl.textContent = res.verdict || '';
+        if (res.error) {
+          outEl.textContent = 'Ошибка: ' + res.error;
+          outEl.classList.add('error');
+        } else if (res.output) {
+          outEl.textContent = res.output;
+        } else {
+          outEl.textContent = '✓ Программа завершилась без вывода.';
+        }
+        outEl.classList.remove('hidden');
+      }).catch(function () {
+        runBtn.disabled = false;
+        statusEl.textContent = 'Ошибка запроса';
+      });
+    });
+  }
+
+  /* --- Викторина --- */
+  var quizBtn = document.getElementById('quizCheck');
+  if (quizBtn) {
+    quizBtn.addEventListener('click', function () {
+      var questions = document.querySelectorAll('.quiz-question');
+      var answers = [];
+      questions.forEach(function (q) {
+        var checked = q.querySelector('input[type=radio]:checked');
+        answers.push(checked ? parseInt(checked.value, 10) : null);
+      });
+      var url = quizBtn.dataset.url;
+      if (!url) return;
+      postJSON(url, { answers: answers }).then(function (res) {
+        var scoreEl = document.getElementById('quizScore');
+        if (scoreEl) scoreEl.textContent = res.score + ' из ' + res.total;
+        res.results.forEach(function (r, i) {
+          var q = questions[i];
+          if (!q) return;
+          q.classList.remove('correct', 'incorrect');
+          q.classList.add(r.correct ? 'correct' : 'incorrect');
+          var fb = q.querySelector('.quiz-feedback');
+          if (!fb) return;
+          fb.className = 'quiz-feedback ' + (r.correct ? 'ok' : 'bad');
+          if (r.correct) {
+            fb.textContent = '✓ Верно! ' + (r.explanation || '');
+          } else {
+            fb.textContent = '✗ Неверно. ' + (r.explanation || 'Правильный ответ подсвечен.');
+            var opts = q.querySelectorAll('.quiz-option input');
+            if (opts[r.correct_index]) opts[r.correct_index].checked = true;
+          }
+        });
+      });
+    });
+  }
+
+  /* --- Автосохранение заметок --- */
+  var noteText = document.getElementById('noteText');
+  if (noteText) {
+    var noteTimer = null;
+    var noteStatus = document.getElementById('noteStatus');
+    var noteUrl = noteText.dataset.url;
+    noteText.addEventListener('input', function () {
+      if (noteStatus) noteStatus.textContent = 'Сохранение…';
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(function () {
+        if (!noteUrl) return;
+        var fd = new FormData();
+        fd.append('text', noteText.value);
+        fd.append('csrfmiddlewaretoken', getCsrf());
+        fetch(noteUrl, { method: 'POST', body: fd })
+          .then(function (r) { return r.json(); })
+          .then(function () {
+            if (noteStatus) noteStatus.textContent = '✓ Сохранено';
+          })
+          .catch(function () {
+            if (noteStatus) noteStatus.textContent = 'Ошибка сохранения';
+          });
+      }, 800);
+    });
+  }
 })();

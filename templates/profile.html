@@ -5,18 +5,47 @@
 <section class="page-head">
   <div class="container">
     <h1>Мой прогресс</h1>
-    <p class="lead muted">{{ user.username }}, ты прошёл {{ completed }} из {{ total_lessons }} уроков ({{ pct_total }}%)</p>
+    <p class="lead muted">{{ user.username }}, ты решил {{ completed }} из {{ total_lessons }} уроков ({{ pct_total }}%)</p>
   </div>
 </section>
 
 <section class="section">
   <div class="container">
     <div class="stats">
-      <div class="stat"><b>{{ completed }}</b><span>уроков пройдено</span></div>
+      <div class="stat"><b>{{ completed }}</b><span>уроков решено</span></div>
       <div class="stat"><b>{{ pct_total }}%</b><span>курса</span></div>
-      <div class="stat"><b>{{ data|length }}</b><span>модулей</span></div>
+      <div class="stat"><b>{% if streak %}{{ streak }}{% else %}0{% endif %} 🔥</b><span>дней подряд</span></div>
     </div>
 
+    <div class="profile-actions">
+      <a class="btn btn-ghost" href="{% url 'export_progress' %}">⬇ Экспорт прогресса (CSV)</a>
+    </div>
+
+    <div class="section-head" style="margin-top: 36px;">
+      <h2>Достижения</h2>
+      <p class="muted">Их можно получить, решая уроки и занимаясь регулярно.</p>
+    </div>
+    <div class="badges-grid">
+      {% for ach in all_achievements %}
+        {% if ach.id in achieved_ids %}
+          <div class="badge owned" title="{{ ach.description }}">
+            <span class="badge-icon">{{ ach.icon }}</span>
+            <div class="badge-title">{{ ach.title }}</div>
+            <div class="badge-desc">{{ ach.description }}</div>
+          </div>
+        {% else %}
+          <div class="badge locked" title="{{ ach.description }}">
+            <span class="badge-icon">🔒</span>
+            <div class="badge-title">{{ ach.title }}</div>
+            <div class="badge-desc">{{ ach.description }}</div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="section-head" style="margin-top: 40px;">
+      <h2>Модули</h2>
+    </div>
     <div class="profile-modules">
       {% for item in data %}
         <div class="card profile-module">
@@ -37,7 +66,7 @@
 
     {% if last_done %}
       <div class="section-head" style="margin-top: 40px;">
-        <h2>Недавно пройдено</h2>
+        <h2>Недавно решено</h2>
       </div>
       <div class="list-cards">
         {% for p in last_done %}

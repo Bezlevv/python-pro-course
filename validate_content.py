@@ -11,7 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from learn.utils import parse_lesson_file
+from learn.utils import (
+    FRONT_MATTER_RE,
+    TASK_SECTION_RE,
+    parse_lesson_file,
+    parse_quiz,
+    split_numbered_sections,
+)
 
 CONTENT = Path(__file__).resolve().parent / 'content'
 MIN_THEORY_WORDS = 200
@@ -64,15 +70,21 @@ def main():
             task_words = words_count(data.get('task_md', ''))
             hint_words = words_count(data.get('hint_md', ''))
             solution_words = words_count(data.get('solution_md', ''))
+            tasks_count = len(split_numbered_sections(data.get('task_md', ''), TASK_SECTION_RE))
+            quizzes_count = len(parse_quiz(data.get('quiz_md', '')))
 
             if theory_words < MIN_THEORY_WORDS:
                 errors.append(f'{path}: теория слишком короткая ({theory_words} слов < {MIN_THEORY_WORDS})')
             if task_words < MIN_TASK_WORDS:
-                errors.append(f'{path}: задача слишком короткая ({task_words} слов < {MIN_TASK_WORDS})')
+                errors.append(f'{path}: задачи слишком короткие ({task_words} слов < {MIN_TASK_WORDS})')
             if hint_words < MIN_HINT_WORDS:
-                errors.append(f'{path}: подсказка слишком короткая ({hint_words} слов < {MIN_HINT_WORDS})')
+                errors.append(f'{path}: подсказки слишком короткие ({hint_words} слов < {MIN_HINT_WORDS})')
             if solution_words < MIN_SOLUTION_WORDS:
-                errors.append(f'{path}: разбор слишком короткий ({solution_words} слов < {MIN_SOLUTION_WORDS})')
+                errors.append(f'{path}: разборы слишком короткие ({solution_words} слов < {MIN_SOLUTION_WORDS})')
+            if tasks_count < 5:
+                errors.append(f'{path}: задач должно быть не меньше 5 (сейчас {tasks_count})')
+            if quizzes_count < 5:
+                errors.append(f'{path}: вопросов викторины должно быть не меньше 5 (сейчас {quizzes_count})')
 
     print(f'Уроков проверено: {total_lessons}')
     if errors:
