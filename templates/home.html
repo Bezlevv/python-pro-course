@@ -19,8 +19,8 @@
         </div>
         <div class="stats">
           <div class="stat"><b>{{ total_lessons }}</b><span>уроков</span></div>
-          <div class="stat"><b>7</b><span>модулей</span></div>
-          <div class="stat"><b>6</b><span>готовых проектов</span></div>
+          <div class="stat"><b>{{ total_modules }}</b><span>модулей</span></div>
+          <div class="stat"><b>{{ total_projects }}</b><span>готовых проектов</span></div>
         </div>
       </div>
       <div class="hero-visual">
@@ -51,7 +51,7 @@
   <div class="container">
     <div class="section-head">
       <h2>Путь обучения</h2>
-      <p class="muted">Семь модулей — от азов до больших проектов. Модули идут по нарастающей сложности, но заглядывать в любой можно в любой момент.</p>
+      <p class="muted">{{ total_modules }} модулей — от азов до больших проектов. Модули идут по нарастающей сложности, но заглядывать в любой можно в любой момент.</p>
     </div>
     {% if user.is_authenticated %}
       <div class="overall-progress">

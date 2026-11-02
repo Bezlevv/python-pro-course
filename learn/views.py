@@ -193,9 +193,13 @@ def home(request):
     total_lessons = Lesson.objects.count()
     completed = sum(item['done'] for item in modules_data)
     recent = Lesson.objects.select_related('module').order_by('-created')[:6]
+    project_module = Module.objects.filter(slug='07-projects').first()
+    total_projects = project_module.lessons.exclude(is_exam=True).count() if project_module else 0
     return render(request, 'home.html', {
         'modules_data': modules_data,
         'total_lessons': total_lessons,
+        'total_modules': Module.objects.count(),
+        'total_projects': total_projects,
         'completed': completed,
         'completed_pct': round(completed / total_lessons * 100) if total_lessons else 0,
         'recent': recent,
