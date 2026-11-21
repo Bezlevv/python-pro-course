@@ -137,6 +137,14 @@ class BookViewSet(viewsets.ModelViewSet):
 
 С `detail=False` действие доступно по адресу `/api/books/recent/` (без id), а с `detail=True` — `/api/books/<pk>/publish/`. Параметр `methods` задаёт HTTP-методы.
 
+```mermaid
+flowchart LR
+    A["ViewSet"] --> B["Router"]
+    B --> C["Имена маршрутов"]
+    C --> D["@action"]
+    D --> E["Кастомные действия"]
+```
+
 ## Итог
 
 `generics` убирают шаблонный код для типовых операций, `ViewSet` объединяет их в один класс, а `Router` строит маршруты автоматически. Кастомные действия через `@action` добавляют свои адреса. В следующем уроке мы добавим к этому аутентификацию и права доступа.
@@ -156,6 +164,11 @@ class BookViewSet(viewsets.ModelViewSet):
 
 ### Задача 5
 Создай `BookViewSet` на базе `ReadOnlyModelViewSet` для модели `Author` (поле `name`). Убедись, что доступны только GET-методы (список и одна запись), а POST возвращает `405 Method Not Allowed`. Для проверки используй curl.
+### Задача 6 — Кастомное действие through @action
+Добавь во `BookViewSet` действие `@action(detail=True, methods=["post"]) def mark_sold(self, request, pk=None)`, устанавливающее `book.sold = True`. Проверь URL: `books/{pk}/mark_sold/`.
+### Задача 7 — Использование mixins
+Напиши `BookListCreateView` на базе `ListModelMixin` + `CreateModelMixin` + `GenericAPIView` с `get_queryset` и `get_serializer_class`.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -173,6 +186,11 @@ class BookViewSet(viewsets.ModelViewSet):
 
 ### Подсказка 5
 `ReadOnlyModelViewSet` наследуется от `generics.ListAPIView` и `generics.RetrieveAPIView` — у него есть только `list` и `retrieve`. Создание вернёт `405`, потому что маршрут для POST просто не будет зарегистрирован.
+### Подсказка 6
+@action заканчивается в router-URL-ах: `books/{pk}/mark_sold/`; атрибут detail=True означает конкретный объект.
+### Подсказка 7
+Mixin-классы добавляют методы list() и create(); достаточно переопределить queryset и serializer_class.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -295,6 +313,40 @@ class AuthorViewSet(viewsets.ReadOnlyModelViewSet):
 ```
 
 Что здесь происходит? `ReadOnlyModelViewSet` унаследован от `ListAPIView` и `RetrieveAPIView`, поэтому он знает только методы `list` и `retrieve` — GET списка и GET одной записи. Router не создаёт маршрутов для POST/PUT/DELETE, поэтому такие запросы вернут `405 Method Not Allowed`. Это удобный способ ограничить API режимом «только чтение».
+### Разбор 6
+```python
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+
+    @action(detail=True, methods=["post"])
+    def mark_sold(self, request, pk=None):
+        book = self.get_object()
+        book.sold = True
+        book.save()
+        return Response({"status": "sold"})
+```
+@action добавляет кастомное действие без ручного URL-роутинга.
+### Разбор 7
+```python
+from rest_framework.mixins import ListModelMixin, CreateModelMixin
+from rest_framework.generics import GenericAPIView
+
+class BookListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+```
+Mixin-ы несут готовую логику list/create; схема повторяет ModelViewSet вручную.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -367,4 +419,37 @@ Generic-вьюхи автоматически возвращают 404 для н
 - Добавить свойство only_read = True
 * Правильный ответ: Наследоваться от ReadOnlyModelViewSet
 ReadOnlyModelViewSet оставляет только list и retrieve.
+Что делает @action в ViewSet?
+- Добавляет кастомное действие, которое роутится автоматически
+- Создаёт новую модель
+- Заменяет list
+- Удаляет маршруты
+* Правильный ответ: Добавляет кастомное действие, которое роутится автоматически
+Router сам построит URL для действия.
+
+Что значит detail=True в @action?
+- Действие применяется к конкретному объекту (pk)
+- К списку
+- К сериализатору
+- К маршруту
+* Правильный ответ: Действие применяется к конкретному объекту (pk)
+Потребуется pk в URL.
+
+Что дают Mixin-классы?
+- Готовые методы list/create/update/retrieve/destroy
+- Ничего
+- Только импорт
+- Модели
+* Правильный ответ: Готовые методы list/create/update/retrieve/destroy
+Mixin-ы комбинируются с GenericAPIView.
+
+Какой класс объединяет всё — list, create, retrieve, update, delete?
+- ModelViewSet
+- APIView
+- View
+- SimpleView
+* Правильный ответ: ModelViewSet
+ModelViewSet наследует все Mixin-ы и даёт полный CRUD.
+
+# 
 <!--/QUIZ-->

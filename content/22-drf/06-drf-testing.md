@@ -137,6 +137,14 @@ python manage.py test books.tests.BookAPITests
 python manage.py test books.tests.BookAPITests.test_create_book
 ```
 
+```mermaid
+flowchart LR
+    A["APITestCase"] --> B["APIClient"]
+    B --> C["force_authenticate"]
+    C --> D["GET / POST запросы"]
+    D --> E["assertEqual(status_code)"]
+```
+
 ## Итог
 
 `APITestCase` + `APIClient` позволяют покрывать тестами все сценарии: списки, создание, валидацию, права, пагинацию, фильтрацию. Тесты запускаются одной командой и работают на временной базе данных. Это обязательная часть профессионального API.
@@ -156,6 +164,11 @@ python manage.py test books.tests.BookAPITests.test_create_book
 
 ### Задача 5
 Напиши тест `test_delete_book`: создай книгу, отправь DELETE на `reverse("book-detail", args=[book.id])`, проверь, что ответ `204 No Content`, а `Book.objects.count()` равен 0. Также проверь, что повторный GET этой книги вернёт `404`.
+### Задача 6 — Тест со статусами
+Напиши тест: анонимный GET `/api/books/` возвращает 200; анонимный POST — 401 (если настроено разрешение). Используй `APITestCase` и `self.client`.
+### Задача 7 — force_authenticate
+Авторизуй пользователя через `self.client.force_authenticate(user=user)` и проверь, что POST `/api/books/` создаёт объект (201). Убедись, что объект появился в базе.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -173,6 +186,11 @@ python manage.py test books.tests.BookAPITests.test_create_book
 
 ### Подсказка 5
 `reverse("book-detail", args=[book.id])` строит URL конкретной книги. DELETE возвращает `204 No Content`. После удаления `Book.objects.count()` равен 0, а GET по тому же URL — `404`.
+### Подсказка 6
+`from rest_framework.test import APITestCase`; `self.client.get(url)` и `self.client.post(url, data)`.
+### Подсказка 7
+force_authenticate выставляет пользователя в тестовом клиенте без реального токена.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -274,6 +292,35 @@ def test_delete_book(self):
 ```
 
 Что здесь происходит? `args=[book.id]` подставляет id в URL. DELETE на `RetrieveUpdateDestroyAPIView` удаляет книгу и возвращает `204 No Content`. Тот факт, что после этого GET даёт `404`, подтверждает, что запись действительно удалена из базы.
+### Разбор 6
+```python
+from rest_framework.test import APITestCase
+from rest_framework import status
+
+class BookApiTests(APITestCase):
+    def test_anon_get_ok(self):
+        r = self.client.get("/api/books/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_anon_post_denied(self):
+        r = self.client.post("/api/books/", {"title": "X"})
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+```
+Анонимный доступ проверяется прямыми запросами.
+### Разбор 7
+```python
+class BookApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="u", password="12345")
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_book(self):
+        r = self.client.post("/api/books/", {"title": "Книга", "author": "Автор", "year": 2020})
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Book.objects.count(), 1)
+```
+force_authenticate упрощает тесты: не нужен настоящий токен.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -346,4 +393,37 @@ manage.py test запускает тесты указанного приложе
 - Что ответ содержит 200
 * Правильный ответ: Что в ответе есть ключ published
 assertIn проверяет наличие ключа в словаре response.data.
+Что делает force_authenticate?
+- Устанавливает пользователя в тестовом клиенте
+- Создаёт токен
+- Удаляет пользователя
+- Логинит запросы
+* Правильный ответ: Устанавливает пользователя в тестовом клиенте
+Тесты проходят без реальной аутентификации.
+
+Какой класс использовать для тестов API?
+- APITestCase
+- TestCase
+- SimpleTestCase
+- LiveServerTestCase
+* Правильный ответ: APITestCase
+Он включает APIClient и поддержку запросов DRF.
+
+Какой статус ожидается при успешном создании?
+- 201
+- 200
+- 302
+- 404
+* Правильный ответ: 201
+201 Created — стандарт для успешного создания.
+
+Как проверить, что объект создан в базе?
+- Book.objects.count() == 1
+- r.data
+- r.content
+- len(r)
+* Правильный ответ: Book.objects.count() == 1
+Запрос к базе подтверждает создание.
+
+# 
 <!--/QUIZ-->

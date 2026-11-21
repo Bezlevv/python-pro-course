@@ -163,6 +163,14 @@ class BookCursorPagination(CursorPagination):
     ordering = "-id"
 ```
 
+```mermaid
+flowchart LR
+    A["ViewSet"] --> B["FilterBackend"]
+    B --> C["SearchFilter / OrderingFilter"]
+    C --> D["Пagination"]
+    D --> E["Ответ со страницей"]
+```
+
 ## Итог
 
 Фильтрация (`django-filter`) убирает лишние записи по точным значениям, поиск (`SearchFilter`) ищет подстроки, сортировка (`OrderingFilter`) расставляет порядок, а пагинация делит ответ на страницы. Вместе они делают API быстрым и удобным для клиентов. В заключительном уроке мы напишем тесты на всё это.
@@ -182,6 +190,11 @@ class BookCursorPagination(CursorPagination):
 
 ### Задача 5
 Создай класс `BookPagination(PageNumberPagination)` с `page_size = 10`, `page_size_query_param = "page_size"` и `max_page_size = 50`. Подключи его в `BookViewSet` через `pagination_class`. Проверь: `?page_size=25` возвращает до 25 записей, а `?page_size=999` — не больше 50.
+### Задача 6 — Класс пагинации
+Создай `StandardResultsSetPagination(PageNumberPagination)` с `page_size = 5` и подключи его к `BookViewSet.pagination_class`. Проверь: `?page=2` возвращает соответствующую страницу, а в ответе есть `next`/`count`.
+### Задача 7 — Search и Ordering
+Добавь в BookViewSet `filter_backends = [SearchFilter, OrderingFilter]`, `search_fields = ["title", "author"]`, `ordering_fields = ["price", "year"]`. Проверь `?search=война` и `?ordering=price`.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -199,6 +212,11 @@ class BookCursorPagination(CursorPagination):
 
 ### Подсказка 5
 Класс наследуется от `PageNumberPagination`, атрибуты: `page_size`, `page_size_query_param`, `max_page_size`. Подключение — `pagination_class = BookPagination` внутри вьюхи.
+### Подсказка 6
+PageNumberPagination использует параметр page; в ответе появляются count/next/previous/results.
+### Подсказка 7
+SearchFilter ищет по search_fields (частичное совпадение), OrderingFilter сортирует по ordering_fields.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -330,6 +348,33 @@ class BookViewSet(viewsets.ModelViewSet):
 ```
 
 Что здесь происходит? `page_size_query_param` даёт клиенту возможность самому задавать размер страницы. `max_page_size` ограничивает этот размер, чтобы слишком большое значение не нагружало сервер. Теперь `?page_size=25` вернёт по 25 записей, а `?page_size=999` — не больше 50.
+### Разбор 6
+```python
+from rest_framework.pagination import PageNumberPagination
+
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 5
+    page_size_query_param = "page_size"
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    pagination_class = StandardResultsSetPagination
+```
+Ответ: `{"count": 13, "next": "...?page=2", "results": [...]}`.
+### Разбор 7
+```python
+from rest_framework.filters import SearchFilter, OrderingFilter
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ["title", "author"]
+    ordering_fields = ["price", "year"]
+```
+`?search=война&ordering=price` даёт отфильтрованный и отсортированный список.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -402,4 +447,37 @@ CursorPagination работает с курсорами, а не с номера
 - Максимальное число страниц
 * Правильный ответ: Максимальный размер страницы
 Даже если клиент запросит 999, больше max_page_size не отдастся.
+Что делает PageNumberPagination?
+- Разбивает ответ на страницы с параметром page
+- Сортирует
+- Ищет
+- Фильтрует
+* Правильный ответ: Разбивает ответ на страницы с параметром page
+В ответе появляются count/next/results.
+
+Что ищет SearchFilter?
+- Подстроку в указанных search_fields
+- Точное совпадение
+- По id
+- Не ищет
+* Правильный ответ: Подстроку в указанных search_fields
+q-параметр — search.
+
+Что делает OrderingFilter?
+- Сортирует по указанным ordering_fields
+- Пагинирует
+- Ограничивает доступ
+- Группирует
+* Правильный ответ: Сортирует по указанным ordering_fields
+Параметр ordering принимает имена полей.
+
+Как задать размер страницы?
+- page_size, атрибут класса пагинации
+- В views.py
+- В моделях
+- В URL
+* Правильный ответ: page_size, атрибут класса пагинации
+Класс пагинации подключается к view.
+
+# 
 <!--/QUIZ-->

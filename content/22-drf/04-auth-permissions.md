@@ -185,6 +185,14 @@ class BookViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
 ```
 
+```mermaid
+flowchart LR
+    A["Запрос"] --> B["Authentication"]
+    B --> C["Permission"]
+    C --> D["View"]
+    D --> E["Ответ"]
+```
+
 ## Итог
 
 Token Authentication — просто и наглядно, но токены хранятся в базе. JWT — современный стандарт для API и SPA: без хранения, с короткими access и обновляемыми refresh-токенами. Права ограничивают доступ через встроенные или собственные классы permissions. В следующем уроке займёмся фильтрацией, поиском и пагинацией.
@@ -204,6 +212,11 @@ Token Authentication — просто и наглядно, но токены х�
 
 ### Задача 5
 Создай класс прав `IsOwnerOrReadOnly` (как в теории) и добавь его в `permission_classes` для `BookViewSet`. Добавь модели `Book` поле `owner = models.ForeignKey(User, on_delete=models.CASCADE, null=True)`. Убедись, что невладелец не может обновить или удалить чужую книгу (получит `403 Forbidden`).
+### Задача 6 — Кастомное разрешение владельца
+Создай класс `IsOwnerOrReadOnly(BasePermission)`, который разрешает изменение только владельцу объекта (поле owner = request.user). Подключи его к `TaskViewSet.permission_classes`.
+### Задача 7 — IsAuthenticatedOrReadOnly
+Настрой `TaskViewSet` так: чтение доступно всем, а создание/изменение — только авторизованным. Проверь через `APIClient`: анонимный GET — 200, анонимный POST — 401.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -221,6 +234,11 @@ Token Authentication — просто и наглядно, но токены х�
 
 ### Подсказка 5
 `BasePermission` — из `rest_framework.permissions`. Метод `has_object_permission` получает `request`, `view` и `obj`. Для модели: `from django.contrib.auth.models import User`, поле `owner = models.ForeignKey(User, on_delete=models.CASCADE, null=True)`. Не забудь `makemigrations` и `migrate`.
+### Подсказка 6
+Переопредели `has_object_permission`: для безопасных методов (GET/HEAD/OPTIONS) верни True, иначе `obj.owner == request.user`.
+### Подсказка 7
+Установи `permission_classes = [IsAuthenticatedOrReadOnly]` на viewsets.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -391,6 +409,26 @@ class BookViewSet(viewsets.ModelViewSet):
 ```
 
 Что здесь происходит? `has_object_permission` вызывается для операций с конкретным объектом: PUT, PATCH, DELETE. Чтение разрешено всем аутентифицированным, а изменение — только если `obj.owner == request.user`. Иначе DRF вернёт `403 Forbidden`.
+### Разбор 6
+```python
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsOwnerOrReadOnly(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return obj.owner == request.user
+```
+Для безопасных методов доступ открыт; мутации — только владельцу.
+### Разбор 7
+```python
+class TaskViewSet(viewsets.ModelViewSet):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly]
+```
+Аноним читает, но не создаёт: защита типовых запросов без написания своей логики.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -463,4 +501,37 @@ POST на /api/token/refresh/ с refresh-токеном выдаёт новый 
 - 400 Bad Request
 * Правильный ответ: 403 Forbidden
 Права не прошли — запрет доступа (403).
+Что такое BasePermission?
+- Базовый класс для кастомных разрешений
+- Модель
+- Сериализатор
+- View
+* Правильный ответ: Базовый класс для кастомных разрешений
+Переопределяйте has_permission / has_object_permission.
+
+Что такое SAFE_METHODS?
+- GET, HEAD, OPTIONS
+- POST, PUT
+- DELETE
+- Все методы
+* Правильный ответ: GET, HEAD, OPTIONS
+Безопасные методы не меняют состояние.
+
+Что делает IsAuthenticatedOrReadOnly?
+- Чтение для всех, запись для авторизованных
+- Запрещает всё
+- Открывает всё
+- Только чтение
+* Правильный ответ: Чтение для всех, запись для авторизованных
+Стандартное разрешение для публичных API.
+
+Как проверить владельца объекта в разрешении?
+- Через obj.owner == request.user
+- Через request.data
+- Через get_queryset
+- Через Meta
+* Правильный ответ: Через obj.owner == request.user
+В has_object_permission доступен и объект, и пользователь.
+
+# 
 <!--/QUIZ-->

@@ -154,6 +154,14 @@ class BookSerializer(serializers.ModelSerializer):
         }
 ```
 
+```mermaid
+flowchart LR
+    A["Serializer"] --> B["Валидация"]
+    B --> C["validate_<поле>"]
+    C --> D["SerializerMethodField"]
+    D --> E["Nested сериализаторы"]
+```
+
 ## Итог
 
 Сериализаторы превращают модели в JSON и обратно. Базовый `Serializer` даёт полный контроль, а `ModelSerializer` экономит время и уменьшает вероятность ошибок. Валидация бывает на уровне поля, объекта и через отдельные функции-валидаторы. В следующем уроке мы посмотрим, как писать готовые вьюхи для работы с моделями без ручного кода.
@@ -173,6 +181,11 @@ class BookSerializer(serializers.ModelSerializer):
 
 ### Задача 5
 Используй `extra_kwargs` в `ModelSerializer`, чтобы сделать поле `published` необязательным (с дефолтом 2000) и добавить валидатор, запрещающий пустой заголовок `title`. Подсказка: для дефолта нужен `"default": 2000` в `extra_kwargs` для поля `published`. Проверь, что книга без `published` создаётся с годом 2000.
+### Задача 6 — Валидатор поля и уровня объекта
+Добавь в сериализатор `BookSerializer`: метод `validate_year(value)` — отклоняй год > 2100 сообщением «Год не может быть в будущем», и метод `validate(data)` — проверяй, что `title` и `author` неодинаковы. Проверь через `is_valid()` с выводом `errors`.
+### Задача 7 — SerializerMethodField
+Добавь вычисляемое поле `revenue_status` (например, "high"/"low" для значения `price` > 100), через `SerializerMethodField`, и метод `get_revenue_status`. Ожидаемый результат: поле появляется в `serializer.data` и отсутствует при создании.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -190,6 +203,11 @@ class BookSerializer(serializers.ModelSerializer):
 
 ### Подсказка 5
 В `class Meta` добавь `extra_kwargs = {"published": {"default": 2000}}`. Для валидатора заголовка создай функцию-валидатор и укажи её в `extra_kwargs` для `title`: `{"validators": [validate_title]}`.
+### Подсказка 6
+Методы `validate_<имя>` вызываются после стандартных валидаторов; `validate` — для всего объекта.
+### Подсказка 7
+`SerializerMethodField` не участвует во входных данных, только в выводе.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -322,6 +340,38 @@ class BookSerializer(serializers.ModelSerializer):
 ```
 
 Что здесь происходит? `extra_kwargs` позволяет переопределить настройки полей без ручного описания. `default` подставляет значение, если клиент не прислал поле. `validators` добавляет функцию-валидатор, которая вызывается при проверке данных. Теперь книга без `published` создастся с годом 2000, а пустой заголовок будет отклонён.
+### Разбор 6
+```python
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "author", "year", "price"]
+
+    def validate_year(self, value):
+        if value > 2100:
+            raise serializers.ValidationError("Год не может быть в будущем")
+        return value
+
+    def validate(self, attrs):
+        if attrs.get("title") == attrs.get("author"):
+            raise serializers.ValidationError("Название и автор не должны совпадать")
+        return attrs
+```
+`validate_year` срабатывает на конкретном поле; `validate` — на уровне всех данных.
+### Разбор 7
+```python
+class BookSerializer(serializers.ModelSerializer):
+    revenue_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Book
+        fields = ["id", "title", "author", "price", "revenue_status"]
+
+    def get_revenue_status(self, obj):
+        return "high" if obj.price > 100 else "low"
+```
+Метод `get_<имя>` вычисляет значение для вывода — данные не приходят от клиента.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -394,4 +444,37 @@ errors — это словарь, где ключ — имя поля, знач�
 - field_title
 * Правильный ответ: validate_title
 DRF ищет метод validate_<имя_поля> и вызывает его после базовой проверки.
+Что делает метод validate_year(value)?
+- Пользовательскую валидацию одного поля
+- Форматирование вывода
+- Создание записи
+- Удаление поля
+* Правильный ответ: Пользовательскую валидацию одного поля
+Он вызывается после стандартных валидаторов.
+
+Что такое SerializerMethodField?
+- Поле только для чтения, вычисляемое методом get_<имя>
+- Обычное поле модели
+- Поле ввода
+- Валидатор
+* Правильный ответ: Поле только для чтения, вычисляемое методом get_<имя>
+Оно появляется в выводе, но не ожидается на входе.
+
+Какое исключение бросают валидаторы DRF?
+- serializers.ValidationError
+- ValueError
+- TypeError
+- DjangoValidationError
+* Правильный ответ: serializers.ValidationError
+Оно собирается в serializer.errors.
+
+Что вернёт is_valid(), если данные корректны?
+- True
+- False
+- None
+- Ошибку
+* Правильный ответ: True
+После is_valid() данные — в validated_data.
+
+# 
 <!--/QUIZ-->
