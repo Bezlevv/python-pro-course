@@ -45,6 +45,86 @@ def quiz_html(lesson):
     return '\n'.join(parts)
 
 
+def quiz_html_from_md(quiz_md):
+    from learn.utils import parse_quiz
+    quizzes = parse_quiz(quiz_md)
+    if not quizzes:
+        return ''
+    parts = ['<div class="quiz-block">', '<h3 data-i18n="quiz">[?] Quiz</h3>']
+    for i, q in enumerate(quizzes):
+        options = ''.join(
+            f'<label class="quiz-option"><input type="radio" name="q{i}" '
+            f'value="{j}"><span>{escape(opt)}</span></label>'
+            for j, opt in enumerate(q["options"])
+        )
+        parts.append(
+            f'<div class="quiz-question" data-q="{i}" data-correct="{q["correct_index"]}" '
+            f'data-expl="{escape(q["explanation"][:200])}">'
+            f'<div class="quiz-text">{escape(q["question"])}</div>{options}'
+            f'<div class="quiz-feedback"></div></div>'
+        )
+    parts.append('<button class="quiz-check" type="button" onclick="checkQuiz(this)" data-i18n="check">Check answers</button>')
+    parts.append('<div class="quiz-score"></div></div>')
+    return '\n'.join(parts)
+
+
+SBOX_EN = (
+    '<div class="sandbox">\n'
+    '<h3 data-i18n="sandbox">[>] Python Sandbox</h3>\n'
+    '<textarea id="codeEditor" placeholder="# ..."></textarea>\n'
+    '<div class="sb-actions">\n'
+    '<button class="run-btn" onclick="runCode()" data-i18n="run">Run</button>\n'
+    '<button class="run-btn ghost" onclick="clearOutput()" data-i18n="clear">Clear</button>\n'
+    '</div>\n<pre id="output"></pre></div>'
+)
+
+
+def build_en_lesson_html(data, module_title):
+    title = data.get("title", "Lesson")
+    summary = data.get("summary", "")
+    duration = data.get("duration", "20 min")
+    difficulty = data.get("difficulty", "beginner")
+    diff = {"beginner": "Beginner", "intermediate": "Intermediate", "advanced": "Advanced"}.get(difficulty, difficulty)
+    out = [
+        '<div class="lesson-toolbar">',
+        '<button class="fav-btn" onclick="toggleFav(0)" data-i18n="fav">* Favorite</button>',
+        '<button class="done-btn" onclick="toggleDone(0)" data-i18n="done">v Done</button>',
+        '<div class="toolbar-nav">',
+        '<button class="nav-btn" onclick="navLesson(-1)" data-i18n="prev"><- Previous</button>',
+        '<button class="nav-btn" onclick="navLesson(1)" data-i18n="next">Next -></button>',
+        '</div></div>',
+        '<textarea class="note-area" id="noteArea" placeholder="..."></textarea>',
+        f'<h2>{escape(title)}</h2>',
+        f'<div class="meta"><span>{escape(module_title)}</span> . <span>{escape(diff)}</span> . <span>{escape(duration)}</span></div>',
+    ]
+    if summary:
+        out.append(f'<p class="summary">{escape(summary)}</p>')
+    theory = data.get("theory_md", "")
+    if theory:
+        out.append('<div class="theory">' + render_markdown(theory) + '</div>')
+
+    tasks = split_numbered_sections(data.get("task_md", ""), TASK_SECTION_RE)
+    if tasks:
+        out.append('<div class="tasks"><h3 data-i18n="tasks">[+] Tasks</h3>')
+        hints = dict(split_numbered_sections(data.get("hint_md", ""), TASK_SECTION_RE))
+        solutions = dict(split_numbered_sections(data.get("solution_md", ""), TASK_SECTION_RE))
+        for num, body in tasks:
+            out.append(f'<div class="task"><h4 data-i18n="task">Task {num}</h4>')
+            out.append(f'<div>{render_markdown(body)}</div>')
+            if hints.get(num):
+                out.append('<details class="hint"><summary data-i18n="hint">[?] Hint</summary><div>'
+                           + render_markdown(hints[num]) + '</div></details>')
+            if solutions.get(num):
+                out.append('<details class="solution"><summary data-i18n="solution">[=] Solution</summary><div>'
+                           + render_markdown(solutions[num]) + '</div></details>')
+            out.append('</div>')
+        out.append('</div>')
+
+    out.append(SBOX_EN)
+    out.append(quiz_html_from_md(data.get("quiz_md", "")))
+    return '\n'.join(out)
+
+
 def build_lesson_html(lesson):
     out = [
         '<div class="lesson-toolbar">',
@@ -180,6 +260,8 @@ body{margin:0;font-family:Inter,"Segoe UI",system-ui,sans-serif;background:var(-
 
 JS = """
 const lessons = @@LESSONS@@;
+const lessonsEn = @@LESSONS_EN@@;
+function lessonHtml(id){ return currentLang === 'en' && lessonsEn[id] ? lessonsEn[id] : lessons[id]; }
 const lessonIds = @@IDS@@;
 let activeId = null;
 let editor = null;
@@ -242,7 +324,7 @@ function toggleFav(id){
 function openLesson(id){
   activeId = id;
   const view = document.getElementById('lessonView');
-  view.innerHTML = lessons[id] || '<p>Урок не найден</p>';
+  view.innerHTML = lessonHtml(id) || '<p>Урок не найден</p>';
   view.style.display = 'block';
   document.getElementById('home').style.display = 'none';
   document.querySelectorAll('.lesson-link').forEach(el => {
@@ -540,6 +622,19 @@ def main():
     modules = list(Module.objects.all().order_by('order'))
     lessons = {l.id: l for l in Lesson.objects.select_related('module').all()}
     lessons_html = {lid: build_lesson_html(l) for lid, l in lessons.items()}
+    lessons_en = {}
+    en_root = Path(r'D:\AutoClaw\Python_PRO\content\en')
+    if en_root.exists():
+        from learn.utils import parse_lesson_file
+        for folder in sorted(en_root.iterdir()):
+            if not folder.is_dir():
+                continue
+            for p in sorted(folder.glob('*.md')):
+                data = parse_lesson_file(p.read_text(encoding='utf-8'))
+                module = Module.objects.filter(slug=folder.name).first()
+                lesson = Lesson.objects.filter(slug=p.stem).first()
+                if lesson is not None:
+                    lessons_en[lesson.id] = build_en_lesson_html(data, module.title if module else folder.name)
     lesson_ids = [l.id for l in Lesson.objects.select_related('module').order_by('module__order', 'order')]
     sidebar = build_sidebar(modules)
 
@@ -549,6 +644,7 @@ def main():
     page = page.replace('@@SIDEBAR@@', sidebar)
     page = page.replace('@@COUNT@@', str(len(lessons)))
     page = page.replace('@@LESSONS@@', repr(lessons_html))
+    page = page.replace('@@LESSONS_EN@@', repr(lessons_en))
     page = page.replace('@@IDS@@', repr(lesson_ids))
 
     OUT.write_text(page, encoding='utf-8')
