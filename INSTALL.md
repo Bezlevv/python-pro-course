@@ -174,6 +174,13 @@ python bot/telegram_bot.py
 
 ---
 
+## 8.1 Офлайн-версия
+
+Без сервера можно пользоваться собранным учебником:
+- `PythonPro-Course.html` + папка `offline_res/` — просто открой HTML;
+- `dist/PythonPro.exe` — приложение «всё в одном»;
+- пересборка: `python build_offline.py` и `python -m PyInstaller --noconfirm --onefile --windowed --add-data "PythonPro-Course.html;." --add-data "offline_res;offline_res" --name PythonPro course_app.py`.
+
 ## 9. Возможные проблемы
 
 | Проблема | Решение |

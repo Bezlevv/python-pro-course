@@ -58,3 +58,6 @@ Thumbs.db
 /dist/
 *.spec
 /PythonPro-Course.html
+
+# Офлайн-ресурсы (CodeMirror/Pyodide) — бинарники
+/offline_res/
