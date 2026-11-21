@@ -1,7 +1,7 @@
 # Отчёт: уроки, требующие доработки по новым нормам
 
 Всего обычных уроков: 286
-Требуют доработки: 159
+Требуют доработки: 155
 Нормы: >= 7 задач, >= 12 вопросов, схема Mermaid в теории.
 
 ## По модулям
@@ -129,12 +129,6 @@
   - content/33-vision/04-yolo-detection.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
   - content/33-vision/05-video-processing.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
   - content/33-vision/06-vision-project.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
-
-### Конкурентность (4)
-  - content/08-concurrency/01-threading.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/08-concurrency/02-gil-multiprocessing.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/08-concurrency/03-asyncio-deep.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/08-concurrency/04-pools-queues.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
 
 ### Крутые фишки: автоматизация и инструменты (4)
   - content/18-tricks/04-office-automation.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
