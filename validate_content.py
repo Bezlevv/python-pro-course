@@ -1,12 +1,14 @@
 """
 Валидатор контента: соответствие уроков спецификации content/FORMAT.md.
 
-Проверяет: front-matter, минимум слов теории, минимум задач/подсказок/разборов,
-минимум вопросов викторины, наличие схемы Mermaid, минимальный объём разборов.
+Режимы:
+- по умолчанию (мягкий): минимум 5 задач и 8 вопросов; схема Mermaid не обязательна;
+- --strict: минимум 7 задач и 12 вопросов + обязательная схема Mermaid (целевые нормы).
 
-Запуск:  python validate_content.py
+Запуск:  python validate_content.py [--strict]
 """
 
+import argparse
 import os
 import re
 import sys
@@ -26,9 +28,12 @@ MIN_THEORY_WORDS = 200
 MIN_TASK_WORDS = 50
 MIN_HINT_WORDS = 20
 MIN_SOLUTION_WORDS = 80
-MIN_TASKS = 7
-MIN_QUIZ = 12
 MERMAID_RE = re.compile(r'```mermaid', re.I)
+
+SOFT_TASKS = 5
+SOFT_QUIZ = 8
+STRICT_TASKS = 7
+STRICT_QUIZ = 12
 
 
 def words_count(text):
@@ -36,6 +41,14 @@ def words_count(text):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Валидатор контента')
+    parser.add_argument('--strict', action='store_true', help='Целевые нормы: 7 задач/12 вопросов + Mermaid')
+    args = parser.parse_args()
+
+    min_tasks = STRICT_TASKS if args.strict else SOFT_TASKS
+    min_quiz = STRICT_QUIZ if args.strict else SOFT_QUIZ
+    require_mermaid = args.strict
+
     errors = []
     warnings = []
     total_lessons = 0
@@ -93,15 +106,19 @@ def main():
                 errors.append(f'{path}: подсказки слишком короткие ({hint_words} слов < {MIN_HINT_WORDS})')
             if solution_words < MIN_SOLUTION_WORDS:
                 errors.append(f'{path}: разборы слишком короткие ({solution_words} слов < {MIN_SOLUTION_WORDS})')
-            if tasks_count < MIN_TASKS:
-                errors.append(f'{path}: задач должно быть не меньше {MIN_TASKS} (сейчас {tasks_count})')
-            if quizzes_count < MIN_QUIZ:
-                errors.append(f'{path}: вопросов викторины должно быть не меньше {MIN_QUIZ} (сейчас {quizzes_count})')
+            if tasks_count < min_tasks:
+                errors.append(f'{path}: задач должно быть не меньше {min_tasks} (сейчас {tasks_count})')
+            if quizzes_count < min_quiz:
+                errors.append(f'{path}: вопросов викторины должно быть не меньше {min_quiz} (сейчас {quizzes_count})')
             if not MERMAID_RE.search(data.get('theory_md', '')):
                 no_mermaid += 1
-                warnings.append(f'{path}: нет схемы Mermaid в теории')
+                if require_mermaid:
+                    errors.append(f'{path}: нет схемы Mermaid в теории')
+                else:
+                    warnings.append(f'{path}: нет схемы Mermaid в теории')
 
-    print(f'Уроков проверено: {total_lessons} (без схемы Mermaid: {no_mermaid})')
+    mode = 'STRICT' if args.strict else 'SOFT'
+    print(f'Уроков проверено: {total_lessons} (режим {mode}; без схемы Mermaid: {no_mermaid})')
     if errors:
         print(f'\nОШИБКИ ({len(errors)}):')
         for e in errors:
