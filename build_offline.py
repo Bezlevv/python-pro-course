@@ -27,7 +27,7 @@ def quiz_html(lesson):
     quizzes = list(lesson.quizzes.all())
     if not quizzes:
         return ''
-    parts = ['<div class="quiz-block">', '<h3>✅ Викторина</h3>']
+    parts = ['<div class="quiz-block">', '<h3 data-i18n="quiz">✅ Викторина</h3>']
     for i, q in enumerate(quizzes):
         options = ''.join(
             f'<label class="quiz-option"><input type="radio" name="q{i}" '
@@ -40,7 +40,7 @@ def quiz_html(lesson):
             f'<div class="quiz-text">{escape(q.question)}</div>{options}'
             f'<div class="quiz-feedback"></div></div>'
         )
-    parts.append('<button class="quiz-check" type="button" onclick="checkQuiz(this)">Проверить ответы</button>')
+    parts.append('<button class="quiz-check" type="button" onclick="checkQuiz(this)" data-i18n="check">Проверить ответы</button>')
     parts.append('<div class="quiz-score"></div></div>')
     return '\n'.join(parts)
 
@@ -48,13 +48,13 @@ def quiz_html(lesson):
 def build_lesson_html(lesson):
     out = [
         '<div class="lesson-toolbar">',
-        f'<button class="fav-btn" onclick="toggleFav({lesson.id})">★ Избранное</button>',
-        f'<button class="done-btn" onclick="toggleDone({lesson.id})">✓ Пройдено</button>',
+        f'<button class="fav-btn" onclick="toggleFav({lesson.id})" data-i18n="fav">★ Избранное</button>',
+        f'<button class="done-btn" onclick="toggleDone({lesson.id})" data-i18n="done">✓ Пройдено</button>',
         '<div class="toolbar-nav">',
-        '<button class="nav-btn" onclick="navLesson(-1)">← Предыдущий</button>',
-        '<button class="nav-btn" onclick="navLesson(1)">Следующий →</button>',
+        '<button class="nav-btn" onclick="navLesson(-1)" data-i18n="prev">← Предыдущий</button>',
+        '<button class="nav-btn" onclick="navLesson(1)" data-i18n="next">Следующий →</button>',
         '</div></div>',
-        '<textarea class="note-area" id="noteArea" placeholder="📝 Моя заметка к уроку (сохраняется автоматически)"></textarea>',
+        '<textarea class="note-area" id="noteArea" placeholder="📝 ..."></textarea>',
         f'<h2>{escape(lesson.title)}</h2>',
 
         '<div class="meta"><span>' + escape(lesson.module.title) + '</span> · <span>'
@@ -85,11 +85,11 @@ def build_lesson_html(lesson):
 
     out.append(
         '<div class="sandbox">'
-        '<h3>⚡ Песочница Python</h3>'
+        '<h3 data-i18n="sandbox">⚡ Песочница Python</h3>'
         '<textarea id="codeEditor" placeholder="# Напиши код и нажми «Запустить»"></textarea>'
         '<div class="sb-actions">'
-        '<button class="run-btn" onclick="runCode()">Запустить ▶</button>'
-        '<button class="run-btn ghost" onclick="clearOutput()">Очистить</button>'
+        '<button class="run-btn" onclick="runCode()" data-i18n="run">Запустить ▶</button>'
+        '<button class="run-btn ghost" onclick="clearOutput()" data-i18n="clear">Очистить</button>'
         '</div>'
         '<pre id="output"></pre>'
         '</div>'
@@ -252,6 +252,7 @@ function openLesson(id){
   document.getElementById('content').scrollTop = 0;
   initEditor();
   syncLessonUI();
+  applyLang();
 }
 function navLesson(dir){
   const idx = lessonIds.indexOf(activeId);
@@ -418,7 +419,83 @@ openLesson = function(id){
   initNotes();
 };
 
+
+const I18N = {
+  ru: {
+    homeTitle: 'PythonПро — офлайн-курс',
+    homeSub: '39 модулей · ' + lessonIds.length + ' уроков. Python-песочница, автодополнение, викторины, прогресс, закладки, темы.',
+    search: 'Поиск…',
+    progress: 'Прогресс: ',
+    fav: '★ Избранное',
+    done: '✓ Пройдено',
+    prev: '← Предыдущий',
+    next: 'Следующий →',
+    sandbox: '⚡ Песочница Python',
+    run: 'Запустить ▶',
+    clear: 'Очистить',
+    quiz: '✅ Викторина',
+    check: 'Проверить ответы',
+    copy: 'Копировать',
+    copied: '✓ Скопировано',
+    note: '📝 Моя заметка к уроку (сохраняется автоматически)',
+    outputWait: 'Выполняется…',
+    outputOk: '✓ Программа завершилась без вывода.',
+    outputErr: 'Ошибка: ',
+    langNext: 'EN'
+  },
+  en: {
+    homeTitle: 'PythonPro — offline course',
+    homeSub: '39 modules · ' + lessonIds.length + ' lessons. Python sandbox, autocomplete, quizzes, progress, bookmarks, themes.',
+    search: 'Search…',
+    progress: 'Progress: ',
+    fav: '★ Favorite',
+    done: '✓ Done',
+    prev: '← Previous',
+    next: 'Next →',
+    sandbox: '⚡ Python Sandbox',
+    run: 'Run ▶',
+    clear: 'Clear',
+    quiz: '✅ Quiz',
+    check: 'Check answers',
+    copy: 'Copy',
+    copied: '✓ Copied',
+    note: '📝 My note for this lesson (auto-saved)',
+    outputWait: 'Running…',
+    outputOk: '✓ Finished without output.',
+    outputErr: 'Error: ',
+    langNext: 'RU'
+  }
+};
+let currentLang = localStorage.getItem('pp_lang') || 'ru';
+function t(key){ return (I18N[currentLang] && I18N[currentLang][key]) || (I18N.ru[key] || key); }
+function applyLang(){
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (el.tagName === 'TEXTAREA') el.placeholder = t(key);
+    else el.textContent = t(key);
+  });
+  document.getElementById('progressLine').textContent = t('progress') + progressText();
+  document.getElementById('searchInput').placeholder = t('search');
+  document.getElementById('langBtn').textContent = t('langNext');
+  const out = document.getElementById('output');
+  // не перезаписываем вывод
+}
+function progressText(){
+  const total = lessonIds.length;
+  const done = doneIds().filter(id => lessonIds.includes(id)).length;
+  return (total ? Math.round(done / total * 100) : 0) + '% (' + done + '/' + total + ')';
+}
+function toggleLang(){
+  currentLang = currentLang === 'ru' ? 'en' : 'ru';
+  localStorage.setItem('pp_lang', currentLang);
+  applyLang();
+}
+updateProgress = function(){
+  document.getElementById('progressLine').textContent = t('progress') + progressText();
+};
+
 applyTheme();
+applyLang();
 const last = localStorage.getItem('pp_last');
 if (last && lessons[last]) openLesson(Number(last));
 updateProgress();
@@ -437,15 +514,14 @@ TEMPLATE = """<!DOCTYPE html>
 <body data-theme="dark">
 <div id="layout">
   <div id="sidebar">
-    <div class="brand">🐍 Python<span>Про</span><button class="nav-btn" onclick="toggleTheme()" title="Тема">🌙</button><button class="nav-btn" onclick="exportProgress()" title="Экспорт прогресса">⬇</button></div>
-    <div id="progressLine">Прогресс: 0%</div>
+    <div class="brand">🐍 Python<span>Про</span><button class="nav-btn" onclick="toggleTheme()" title="Тема">🌙</button><button class="nav-btn" onclick="toggleLang()" id="langBtn">EN</button><button class="nav-btn" onclick="exportProgress()" title="Экспорт прогресса">⬇</button></div>
+    <div id="progressLine" ></div>
     @@SIDEBAR@@
   </div>
   <div id="content">
     <div id="home">
-      <h1>PythonПро — офлайн-курс</h1>
-      <p style="color:var(--muted)">39 модулей · @@COUNT@@ уроков.<br>
-      Функции: Python-песочница, автодополнение кода, викторины, прогресс, закладки, тёмная/светлая тема.</p>
+      <h1 data-i18n="homeTitle">PythonПро — офлайн-курс</h1>
+      <p style="color:var(--muted)" data-i18n="homeSub">39 модулей · @@COUNT@@ уроков.</p>
     </div>
     <div id="lessonView" style="display:none"></div>
   </div>
