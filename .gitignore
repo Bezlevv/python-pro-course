@@ -7,6 +7,15 @@ server.log*
 # Служебные файлы оркестрации
 .zwork/
 
+# Артефакты сборки и диагностики
+PythonPro-course-package.zip
+_diag*.py
+_fix*.py
+_stats.py
+_tally.py
+_check.py
+_dump_lessons.py
+
 # Python
 __pycache__/
 *.py[cod]
