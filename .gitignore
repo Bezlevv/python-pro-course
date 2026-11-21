@@ -15,6 +15,27 @@ _stats.py
 _tally.py
 _check.py
 _dump_lessons.py
+_test_mermaid.py
+_add_schemes.py
+_patch*.py
+_scan*.py
+_code*.py
+_peek.py
+_quiz.py
+_chk.py
+_val.txt
+_summary.py
+_build/
+
+# Любые временные файлы
+_*.py
+_*.txt
+*~
+*.tmp
+*.bak
+*.orig
+*.log
+.cache/
 
 # Python
 __pycache__/
