@@ -52,3 +52,9 @@ env/
 # ОС
 Thumbs.db
 .DS_Store
+
+# Сборка офлайн-версии
+/build/
+/dist/
+*.spec
+/PythonPro-Course.html
