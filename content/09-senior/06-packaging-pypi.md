@@ -111,6 +111,14 @@ python -m pip install --index-url https://test.pypi.org/simple/ hello-pack
 
 Важно про версии: PyPI не позволяет перезаписать опубликованную версию. Исправление требует **новой версии** — отсюда практика семантического версионирования (semver): `MAJOR.MINOR.PATCH` — мажорная версия меняется при несовместимых изменениях, минорная — при новых возможностях, патч — при исправлениях ошибок.
 
+```mermaid
+flowchart LR
+    A["pyproject.toml"] --> B["Сборка колеса"]
+    B --> C["twine check"]
+    C --> D["Загрузка на PyPI"]
+    D --> E["pip install из индекса"]
+```
+
 ## Итог урока
 
 Путь таков: структура с `src/`, манифест `pyproject.toml`, сборка через `python -m build`, локальная `-e .` установка, затем `twine upload` — сначала на TestPyPI, потом на PyPI. Теперь собери свой первый пакет.
@@ -206,6 +214,11 @@ python -m pip install --index-url https://test.pypi.org/simple/ hello-pack
 
 Проверь, что `from hello_pack import greet` работает и что `pip show hello-pack` показывает установленную версию. Если публиковать некуда — просто опиши шаги и ожидаемые выводы команд.
 
+### Задача 6 — pyproject.toml
+Создай минимальный pyproject.toml с [project] (name, version, description, requires-python, dependencies) и [build-system] (setuptools). Покажи команды сборки `python -m build`.
+### Задача 7 — Проверка и публикация
+После сборки выполни `twine check dist/*` и, если всё ок, опиши последовательность публикации `twine upload dist/*` на TestPyPI (с токеном). Ожидаемый результат: twine check без ошибок.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -223,6 +236,11 @@ python -m pip install --index-url https://test.pypi.org/simple/ hello-pack
 
 ### Подсказка 5
 Twine check не требует интернета — он читает локальные файлы из `dist/`. Проблемы он находит такие: отсутствующие метаданные, неверные ссылки на лицензию, ошибки чтения архива. Для загрузки подготовь переменные окружения `TWINE_USERNAME=__token__` и `TWINE_PASSWORD=<токен>` — это надёжнее, чем вводить их вручную.
+### Подсказка 6
+`pip install build twine`; `python -m build` создаст dist/ с колесом и tar.gz.
+### Подсказка 7
+`twine check dist/*` проверяет метаданные; `twine upload --repository testpypi dist/*` грузит на TestPyPI.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -359,6 +377,27 @@ python -c "from hello_pack import greet; print(greet('Мир'))"
 ```
 
 `pip show hello-pack` покажет Version: 0.2.0. Полный цикл «собрал → проверил → опубликовал → установил» замкнут.
+### Разбор 6
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mypkg"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["requests"]
+```
+Сборка: `python -m build` → файлы в dist/.
+### Разбор 7
+```bash
+pip install build twine
+python -m build
+twine check dist/*
+```
+twine check перечислит ошибки метаданных (или «OK»). Публикация: `twine upload --repository testpypi dist/*` и ввод токена; далее `pip install --index-url https://test.pypi.org/simple/ mypkg`.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -424,4 +463,37 @@ Wheel ускоряет установку: pip распаковывает его
 - Строкой `import requests` в коде
 * Правильный ответ: В списке `dependencies` внутри раздела `[project]`
 Зависимости перечисляются в `dependencies = ["requests>=2.31", ...]` — их установит pip вместе с пакетом.
+Какой файл описывает современный пакет?
+- pyproject.toml
+- setup.py только
+- README
+- requirements.txt
+* Правильный ответ: pyproject.toml
+Современный стандарт упаковки PEP 517/621.
+
+Что делает twine check?
+- Проверяет метаданные пакетов в dist/
+- Устанавливает пакеты
+- Собирает
+- Удаляет
+* Правильный ответ: Проверяет метаданные пакетов в dist/
+Ошибки метаданных не дадут опубликовать.
+
+Что делает python -m build?
+- Собирает sdist и wheel
+- Устанавливает в систему
+- Запускает тесты
+- Линтит
+* Правильный ответ: Собирает sdist и wheel
+Результат — в папке dist/.
+
+Что нужно для публикации на PyPI?
+- Аккаунт и токен
+- Только GitHub
+- Пароль от почты
+- Ничего
+* Правильный ответ: Аккаунт и токен
+twine запрашивает токен в момент загрузки.
+
+# 
 <!--/QUIZ-->
