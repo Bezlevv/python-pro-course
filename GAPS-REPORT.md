@@ -1,8 +1,8 @@
 # Отчёт: уроки, требующие доработки по новым нормам
 
 Всего обычных уроков: 286
-Требуют доработки: 155
-Нормы: >= 7 задач, >= 12 вопросов, схема Mermaid в теории.
+Требуют доработки: 141
+Нормы: >= 7 задач, >= 12 вопросов, схема Mermaid.
 
 ## По модулям
 
@@ -37,13 +37,6 @@
   - content/27-pyqt/06-styles-theming.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
   - content/27-pyqt/07-threads-async.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
   - content/27-pyqt/08-app-project.md — задач 5<7, вопросов 10<12, нет схемы Mermaid
-
-### Алгоритмы и структуры данных (5)
-  - content/11-algorithms/04-structures-basics.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/11-algorithms/05-heaps.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/11-algorithms/06-graphs.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/11-algorithms/07-dp-intro.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/11-algorithms/08-two-pointers-window.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
 
 ### Архитектура систем (2)
   - content/14-architecture/05-message-queues.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
@@ -196,17 +189,6 @@
   - content/16-ai/04-rag.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
   - content/16-ai/05-langchain.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
   - content/16-ai/06-agents.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-
-### Стандартная библиотека и инструменты (9)
-  - content/03-stdlib/01-collections-itertools.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/02-os-pathlib.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/03-logging.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/04-testing-pytest.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/05-git.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/06-cli-argparse.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/07-uv.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/08-github-collab.md — задач 5<7, вопросов 8<12, нет схемы Mermaid
-  - content/03-stdlib/09-pip-deep.md — задач 5<7, вопросов 9<12, нет схемы Mermaid
 
 ### Что можно сделать с Python (7)
   - content/00-possibilities/02-automation.md — задач 5<7, вопросов 10<12, нет схемы Mermaid

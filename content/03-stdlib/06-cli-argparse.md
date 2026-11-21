@@ -67,6 +67,14 @@ mul_parser.add_argument("numbers", nargs="+", type=float)
 
 Парсер автоматически генерирует справку: `python script.py --help` покажет описание всех аргументов. Для собственных ошибок есть `parser.error("сообщение")` — он печатает сообщение, подсказку использования и завершает программу.
 
+```mermaid
+flowchart LR
+    A["python tool.py"] --> B["ArgumentParser"]
+    B --> C["add_argument"]
+    C --> D["parse_args"]
+    D --> E["args.имя"]
+```
+
 ## Итог урока
 
 Мы разобрали argparse: позиционные аргументы, флаги, типы, `default`, `choices`, подкоманды и автоматическую справку. Теперь соберём настоящую CLI-утилиту.
@@ -121,6 +129,11 @@ mul_parser.add_argument("numbers", nargs="+", type=float)
 3. Если подкоманда не указана — парсер завершается с ошибкой (сделай `required=True`).
 
 Ожидаемый результат: `python calc_sub.py add 1 2 3` печатает `6.0`; `python calc_sub.py mul 2 4` — `8.0`; запуск без подкоманды — сообщение об ошибке.
+### Задача 6 — Флаги и значения по умолчанию
+Сделай CLI-утилиту: `python tool.py --name Имя --verbose --times N` (по умолчанию times=1). Программа печатает приветствие N раз, а при --verbose добавляет время запуска. Ожидаемый результат: корректный разбор аргументов и вывод. Опиши, зачем нужны значения по умолчанию.
+### Задача 7 — Подкоманды
+Расширь утилиту: подкоманды `hello` и `calc` (calc принимает два числа и операцию: add/sub). Ожидаемый результат: `python tool.py calc add 4 7` выводит 11. Опиши, как add_subparsers организует подкоманды.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -138,6 +151,11 @@ mul_parser.add_argument("numbers", nargs="+", type=float)
 
 ### Подсказка 5
 Создай `subparsers = parser.add_subparsers(dest="command", required=True)`, затем `add_parser = subparsers.add_parser("add")` и добавь ему `numbers`. В конце проверяй `args.command` и вызывай соответствующую операцию. Не забудь `required=True`, иначе запуск без подкоманды не будет ошибкой.
+### Подсказка 6
+`parser.add_argument("--verbose", action="store_true")` — флаг без значения. `default` задаёт значение по умолчанию.
+### Подсказка 7
+`sub = parser.add_subparsers(dest="command")`; для каждой подкоманды — свой subparser с аргументами.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -333,6 +351,46 @@ calc_sub.py: error: the following arguments are required: command
 ```
 
 Разбор шагов. `add_subparsers(dest="command", required=True)` создаёт точку ветвления: подкоманды `add` и `mul` — фактически отдельные мини-парсеры со своими аргументами. `dest="command"` сохраняет имя выбранной подкоманды в `args.command`, а `required=True` делает её обязательной — без неё программа завершается ошибкой. Каждая подкоманда имеет собственный позиционный аргумент `numbers` с `nargs="+"` и `type=float`. После разбора мы ветвимся по `args.command`: для `add` подходит встроенная `sum`, а для `mul` — `reduce` с умножением, который сворачивает список чисел в одно произведение. Такая структура повторяет устройство реальных инструментов — `git`, `pip`, `uv`: одна программа, много подкоманд, у каждой свои опции.
+### Разбор 6
+```python
+import argparse
+import time
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--name", default="мир")
+parser.add_argument("--verbose", action="store_true")
+parser.add_argument("--times", type=int, default=1)
+args = parser.parse_args()
+
+for _ in range(args.times):
+    print(f"Привет, {args.name}!")
+if args.verbose:
+    print("Время:", time.ctime())
+```
+default упрощает запуск без аргументов; store_true превращает присутствие флага в True.
+### Разбор 7
+```python
+import argparse
+
+parser = argparse.ArgumentParser()
+sub = parser.add_subparsers(dest="command")
+
+hello = sub.add_parser("hello")
+hello.add_argument("--name", default="мир")
+
+calc = sub.add_parser("calc")
+calc.add_argument("op", choices=["add", "sub"])
+calc.add_argument("a", type=int)
+calc.add_argument("b", type=int)
+
+args = parser.parse_args()
+if args.command == "hello":
+    print(f"Привет, {args.name}!")
+elif args.command == "calc":
+    print(args.a + args.b if args.op == "add" else args.a - args.b)
+```
+Каждая подкоманда — отдельный мини-парсер; dest="command" хранит выбранную.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -399,4 +457,37 @@ parser.error — стандартный способ сообщить о соб�
 - initial="значение"
 * Правильный ответ: default="значение"
 Если пользователь не передал аргумент, argparse подставит значение из default в args.
+Что делает action="store_true"?
+- Превращает флаг в логическое True, если он передан
+- Хранит строку
+- Считает вхождения
+- Отключает аргумент
+* Правильный ответ: Превращает флаг в логическое True, если он передан
+Присутствие флага → True; отсутствие → False.
+
+Что такое подкоманды?
+- Отдельные наборы аргументов внутри одной программы
+- Ветки в коде
+- Псевдонимы
+- Несколько программ
+* Правильный ответ: Отдельные наборы аргументов внутри одной программы
+add_subparsers позволяет как у git: одну программу с режимами.
+
+Как ограничить допустимые значения аргумента?
+- choices=[...]
+- default=...
+- type=...
+- required=True
+* Правильный ответ: choices=[...]
+При передаче другого значения argparse выдаст ошибку.
+
+Зачем нужен default?
+- Чтобы задать значение при отсутствии аргумента
+- Чтобы запретить его
+- Чтобы увеличить точность
+- Чтобы сделать аргумент обязательным
+* Правильный ответ: Чтобы задать значение при отсутствии аргумента
+default делает CLI удобным: необязательные параметры.
+
+# 
 <!--/QUIZ-->
