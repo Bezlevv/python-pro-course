@@ -94,6 +94,21 @@ except (FileNotFoundError, json.JSONDecodeError) as e:
 
 `json.JSONDecodeError` ловит битый JSON, `FileNotFoundError` — отсутствующий файл. Хороший скрипт не падает, а ясно сообщает о проблеме.
 
+## Один конфиг — три формата
+
+Какой бы формат ни выбрали, путь один: файл → парсер → словарь Python. Разница только в функции чтения и режиме открытия файла.
+
+```mermaid
+flowchart LR
+    A["config.yaml"] --> B["yaml.safe_load"]
+    C["config.json"] --> D["json.load"]
+    E["config.toml"] --> F["tomllib.load"]
+    B --> G["Словарь Python"]
+    D --> G
+    F --> G
+    G --> H["Приложение"]
+```
+
 ## Итог
 
 Мы научились читать и писать три основных формата конфигурации: JSON через `json`, YAML через `yaml.safe_load`, TOML через `tomllib.load`. Теперь закрепим навык задачами.
@@ -137,6 +152,13 @@ port = 8080
 
 ### Задача 5
 Скрипт `safe_load.py` должен читать конфиг `app.json` и обрабатывать две ошибки: отсутствие файла (`FileNotFoundError`) и битый JSON (`json.JSONDecodeError`). В обоих случаях выведитеди сообщение `Ошибка конфига: <текст ошибки>` и заверши программу с кодом `1`. Создай два тестовых файла: корректный и с ошибкой в JSON (например, с лишней запятой), чтобы проверить оба сценария.
+
+### Задача 6
+Напиши функцию `merged_config(user_cfg, defaults)`, которая рекурсивно объединяет два вложенных словаря: значения из `user_cfg` побеждают, но ключи, которых там нет, берутся из `defaults`. Вложенные словари объединяй рекурсивно, а списки и скаляры заменяй целиком. Исходные словари не мутируй — используй `copy.deepcopy`. Затем напиши `apply_env(config, prefix="APP_")`: для каждой переменной окружения вида `APP_SERVER__HOST` создай или обнови вложенный ключ (`server.host`), приводя значение к `int`, если оно состоит из цифр. Продемонстрируй на базе `{"server": {"host": "localhost", "port": 8000}, "debug": False}`, пользовательском конфиге `{"server": {"port": 9000}}` и переменной `APP_SERVER__HOST=0.0.0.0`. Ожидаемый вывод: `{'server': {'host': '0.0.0.0', 'port': 9000}, 'debug': False}`, а исходный `defaults` должен остаться прежним.
+
+### Задача 7
+Напиши скрипт `validate_convert.py`, который читает `service.yaml`, проверяет обязательные ключи и записывает результат в `service.json`. Схему опиши словарём `REQUIRED = {"name": str, "port": int, "replicas": int}`: для каждого ключа проверь наличие и тип, а при ошибке собери сообщение вида `port: ожидался int, получен str`. Собери все ошибки сразу, а не падай на первой. Если ошибок нет — запиши нормализованный словарь в JSON с `indent=2, ensure_ascii=False` и выведи `OK: service.json записан`. Если ошибки есть — напечатай каждую и заверши работу кодом `1`. Проверь на двух файлах: корректном и с `port: "8080"` в кавычках. Ожидаемый вывод для корректного: `OK: service.json записан`; для битого — строка `port: ожидался int, получен str` и код `1`.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -154,6 +176,13 @@ port = 8080
 
 ### Подсказка 5
 Оборачивай `open` и `json.load` вместе в один `try`. Перехватывай обе ошибки в `except (FileNotFoundError, json.JSONDecodeError) as e:`. Используй `sys.exit(1)` после печати сообщения.
+
+### Подсказка 6
+Начни с копии: `result = copy.deepcopy(defaults)`. Затем цикл по `user_cfg.items()`: если и в `result`, и в `user_cfg` лежат словари — вызывай `merged_config` рекурсивно, иначе присваивай `copy.deepcopy(value)`. Для переменных окружения: `path = name[len(prefix):].lower().split("__")`, затем шагай по `path[:-1]`, создавая уровни через `node.setdefault(part, {})`, и присвой последний ключ. `raw.isdigit()` отличит число от строки.
+
+### Подсказка 7
+Открой YAML через `yaml.safe_load(f) or {}` — пустой файл даст `None`. Для каждого ключа схемы проверь `if key not in data` и `isinstance(value, expected)`. Отдельно обработай ловушку: `bool` — подкласс `int`, поэтому `True` прошёл бы проверку на `int`; добавь `if expected is int and isinstance(value, bool): type_ok = False`. Собери ошибки в список и решай судьбу файла после цикла.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -294,6 +323,102 @@ except (FileNotFoundError, json.JSONDecodeError) as e:
 ```
 
 Что здесь происходит? Мы поймали сразу две возможные проблемы: файла нет (`FileNotFoundError`) и файл есть, но содержимое — не JSON (`json.JSONDecodeError`). В обоих случаях печатаем текст ошибки и завершаемся с кодом `1` — это сигнал для автоматизации, что конфиг негоден. Сообщение от `JSONDecodeError` содержит позицию ошибки (номер строки, столбца и символ), по которой легко найти проблемное место в файле. Такой защитный код — обязательная часть любого скрипта, который читает внешние данные: конфиги могут меняться независимо от кода и ломаться.
+
+### Разбор 6
+Решение:
+
+```python
+import copy
+import os
+
+def merged_config(user_cfg, defaults):
+    result = copy.deepcopy(defaults)
+    for key, value in user_cfg.items():
+        if (key in result and isinstance(result[key], dict)
+                and isinstance(value, dict)):
+            result[key] = merged_config(value, result[key])
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+def apply_env(config, prefix="APP_"):
+    for name, raw in os.environ.items():
+        if not name.startswith(prefix):
+            continue
+        path = name[len(prefix):].lower().split("__")
+        node = config
+        for part in path[:-1]:
+            node = node.setdefault(part, {})
+        node[path[-1]] = int(raw) if raw.isdigit() else raw
+    return config
+
+defaults = {"server": {"host": "localhost", "port": 8000}, "debug": False}
+user_cfg = {"server": {"port": 9000}}
+
+os.environ["APP_SERVER__HOST"] = "0.0.0.0"
+config = apply_env(merged_config(user_cfg, defaults))
+print(config)
+print(defaults)
+```
+
+Вывод:
+
+```
+{'server': {'host': '0.0.0.0', 'port': 9000}, 'debug': False}
+{'server': {'host': 'localhost', 'port': 8000}, 'debug': False}
+```
+
+Что здесь происходит? Функция `merged_config` идёт по ключам пользовательского конфига и для каждого решает: если по этому ключу с обеих сторон словари — нужна рекурсия, иначе значение заменяется целиком (так ведут себя списки и скаляры). `copy.deepcopy` в начале и при присваивании гарантирует, что `defaults` не изменится: без копии вложенный словарь `server` был бы общим объектом, и правка конфига незаметно испортила бы базу. `apply_env` разбирает имя переменной: отрезает префикс, приводит к нижнему регистру и делит по `__`, превращая `APP_SERVER__HOST` в путь `["server", "host"]`. `setdefault` создаёт промежуточные уровни, если их ещё нет, а `isdigit()` даёт простой способ распознать число и сохранить порт как `int`, а не строку.
+
+### Разбор 7
+Решение:
+
+```python
+import json
+import sys
+import yaml
+
+REQUIRED = {"name": str, "port": int, "replicas": int}
+
+def validate(data, schema):
+    errors = []
+    for key, expected in schema.items():
+        if key not in data:
+            errors.append(f"{key}: отсутствует")
+            continue
+        value = data[key]
+        type_ok = isinstance(value, expected)
+        if expected is int and isinstance(value, bool):
+            type_ok = False
+        if not type_ok:
+            errors.append(
+                f"{key}: ожидался {expected.__name__}, "
+                f"получен {type(value).__name__}"
+            )
+    return errors
+
+with open("service.yaml", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+
+errors = validate(data, REQUIRED)
+if errors:
+    for message in errors:
+        print(message)
+    sys.exit(1)
+
+with open("service.json", "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+print("OK: service.json записан")
+```
+
+Вывод для файла с `port: "8080"`:
+
+```
+port: ожидался int, получен str
+```
+
+Что здесь происходит? `yaml.safe_load` разбирает документ в словарь, а `or {}` защищает от пустого файла, который дал бы `None` и сломал проверку `key not in data`. Валидатор устроен как цикл по схеме: сначала проверяется наличие ключа, затем тип. Отдельная ветка про `bool` нужна потому, что в Python `True` является экземпляром `int`, и без неё значение `replicas: true` прошло бы как корректное число. Ошибки не бросаются исключением, а собираются в список — так пользователь видит все проблемы конфига сразу, а не по одной за запуск. Только после успешной проверки данные попадают в JSON: `indent=2` делает файл читаемым, `ensure_ascii=False` сохраняет кириллицу. Код возврата `1` сообщает вызывающему скрипту или CI, что конфиг не принят и деплой нужно остановить.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -352,4 +477,32 @@ JSONDecodeError наследуется от ValueError и сигнализиру
 - requests
 * Правильный ответ: PyYAML
 YAML не входит в стандартную библиотеку; PyYAML даёт yaml.safe_load.
+
+Что вернёт json.load, если в файле лежит массив верхнего уровня?
+- Список Python
+- Словарь Python
+- Ошибку JSONDecodeError
+* Правильный ответ: Список Python
+JSON-массив отображается в список, объект — в словарь.
+
+Чем yaml.safe_load отличается от yaml.load?
+- Не создаёт произвольные объекты и безопасен для недоверенного ввода
+- Работает быстрее
+- Умеет читать только словари
+* Правильный ответ: Не создаёт произвольные объекты и безопасен для недоверенного ввода
+safe_load ограничен базовыми типами, поэтому файл не может выполнить код.
+
+Что произойдёт при json.dump объекта, содержащего set?
+- Возникнет TypeError: set не сериализуется
+- set запишется как список
+- set пропустится
+* Правильный ответ: Возникнет TypeError: set не сериализуется
+JSON знает только объекты, массивы, строки, числа, bool и null.
+
+Как в TOML объявить вложенную таблицу server?
+- [server]
+- server:
+- "server": {}
+* Правильный ответ: [server]
+Квадратные скобки задают таблицу, а key = value внутри — её поля.
 <!--/QUIZ-->

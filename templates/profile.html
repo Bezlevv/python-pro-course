@@ -142,6 +142,28 @@
       {% endif %}
     {% endif %}
 
+    {% if skill_domains %}
+      <div class="section-head" style="margin-top: 40px;">
+        <h2>🧭 Карта навыков</h2>
+        <p class="muted">Прогресс по девяти направлениям курса — наглядно видно, что уже наработано.</p>
+      </div>
+      <div class="skills-grid">
+        {% for d in skill_domains %}
+          <div class="card skill-card">
+            <div class="skill-head">
+              <span class="skill-icon">{{ d.icon }}</span>
+              <span class="skill-title">{{ d.title }}</span>
+              <b class="skill-pct">{{ d.pct }}%</b>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width: {{ d.pct }}%"></div>
+            </div>
+            <div class="muted skill-sub">{{ d.done }} из {{ d.total }} уроков</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     <div class="section-head" style="margin-top: 40px;">
       <h2>Модули</h2>
     </div>

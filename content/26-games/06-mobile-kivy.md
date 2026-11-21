@@ -129,6 +129,21 @@ app.main_loop()
 
 Toga использует настоящие нативные виджеты: на Android они будут выглядеть как обычные Android-элементы, на Windows — как элементы Windows. Это отличается от Kivy, где интерфейс рисуется самостоятельно (и выглядит одинаково везде). Для сборки Android-приложения BeeWare предоставляет инструмент `briefcase` — но это отдельная большая тема.
 
+## Схема: от класса App до виджета
+
+В Kivy приложение — это класс, а интерфейс — дерево виджетов, которое возвращает `build()`. Схема показывает, куда попадает каждое нажатие:
+
+```mermaid
+flowchart TD
+    A["class MyApp(App)"] --> B["build()"]
+    B --> C["Корневой виджет"]
+    C --> D["BoxLayout"]
+    D --> E["Label, Button, TextInput"]
+    E --> F["on_press: обработчик"]
+    F --> G["Свойство .text"]
+    E --> H["kv: id и root"]
+```
+
 ## Итог урока
 
 Мы узнали, как:
@@ -157,6 +172,12 @@ Toga использует настоящие нативные виджеты: н
 
 ### Задача 5
 Перепиши счётчик из задачи 4 с использованием kv-языка: вынеси описание интерфейса в строку `Builder.load_string` (или файл `counter.kv`), используй `id` для надписи и `root.increment()` / `root.reset()` как обработчики. Проверь, что приложение работает так же.
+
+### Задача 6
+Сделай «регулятор громкости»: вертикальный `BoxLayout` с ярлыком «Громкость: 50» и виджетом `Slider` в диапазоне от 0 до 100 с шагом 1 и начальным значением 50. Подпишись на изменение значения через `slider.bind(value=...)` и обновляй текст ярлыка на `Громкость: <целое число>`. Значение приходит дробным, поэтому его нужно приводить к `int`. Ожидаемый вывод: при перетаскивании ползунка ярлык мгновенно меняется — `Громкость: 0`, `Громкость: 37`, `Громкость: 100`, — а само приложение не перезапускается.
+
+### Задача 7
+Собери секундомер на Kivy: ярлык с показаниями, кнопки «Старт», «Стоп» и «Сброс». Для отсчёта используй `Clock.schedule_interval(self.tick, 0.1)` — функция `tick` получает `dt` (время с прошлого вызова) и добавляет его к `self.seconds`. «Стоп» отменяет событие через `event.cancel()`, «Сброс» останавливает отсчёт и возвращает `0.0`. Показывай время с одним знаком после запятой. Ожидаемый вывод: после трёх секунд работы ярлык показывает примерно `3.0 с`, после «Сброса» — `0.0 с`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -174,6 +195,12 @@ Toga использует настоящие нативные виджеты: н
 
 ### Подсказка 5
 Используй `from kivy.lang import Builder` и `Builder.load_string("""<CounterLayout>: ...""")` в начале файла. В kv: `Label: id: label; text: "0"`, кнопки `Button: text: "+1"; on_press: root.increment()` и `Button: text: "Сброс"; on_press: root.reset()`.
+
+### Подсказка 6
+Импортируй `Slider` из `kivy.uix.slider`. Создай его с параметрами `Slider(min=0, max=100, value=50, step=1)`. Метод-обработчик должен принимать два аргумента: `def on_value(self, instance, value):` — Kivy передаёт и сам виджет, и новое значение. Внутри — `self.label.text = f"Громкость: {int(value)}"`. Подписка: `slider.bind(value=self.on_value)`.
+
+### Подсказка 7
+Храни событие в `self.event = None`: это одновременно и «часы», и признак «идёт отсчёт». Старт: `if self.event is None: self.event = Clock.schedule_interval(self.tick, 0.1)`. Стоп: `if self.event is not None: self.event.cancel(); self.event = None`. В `tick(self, dt)` не забудь про `dt` — именно он даёт реальное время, а не номер кадра.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -330,6 +357,84 @@ if __name__ == "__main__":
 ```
 
 Что здесь происходит? Интерфейс описан декларативно на kv-языке. `Builder.load_string` загружает правила прямо из строки (можно вынести в файл `counter.kv` — тогда загрузка не нужна). Правило `<CounterLayout>` связывает описание с классом: `orientation`, виджеты и их обработчики. Через `id: label` мы даём надписи имя, а `self.ids.label` обращается к ней из Python — это главный способ связи kv и кода. Обработчики ссылаются на методы класса через `root.increment()`. Такой код разделяет «вид» и «логику»: менять дизайн можно, не трогая Python.
+
+### Разбор 6
+Решение:
+
+```python
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.slider import Slider
+
+class VolumeApp(App):
+    def build(self):
+        self.label = Label(text="Громкость: 50")
+        slider = Slider(min=0, max=100, value=50, step=1)
+        slider.bind(value=self.on_value)
+
+        layout = BoxLayout(orientation="vertical", padding=20, spacing=20)
+        layout.add_widget(self.label)
+        layout.add_widget(slider)
+        return layout
+
+    def on_value(self, instance, value):
+        self.label.text = f"Громкость: {int(value)}"
+
+if __name__ == "__main__":
+    VolumeApp().run()
+```
+
+Что здесь происходит? `Slider` — виджет с числовым значением, и его свойство `value` испускает событие при каждом изменении. `bind(value=self.on_value)` подписывает метод на это событие. Обработчик получает два аргумента: `instance` — сам ползунок, `value` — новое значение; первый почти всегда не нужен, но обязателен по сигнатуре Kivy. Значение приходит типом `float`, поэтому `int(value)` убирает дробную часть в подписи. Ярлык сохранён в `self.label`, иначе обработчик не смог бы к нему обратиться. Обрати внимание на `step=1`: без него ползунок давал бы произвольные дробные значения.
+
+### Разбор 7
+Решение:
+
+```python
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+
+class TimerApp(App):
+    def build(self):
+        self.seconds = 0.0
+        self.event = None
+
+        self.label = Label(text="0.0 с", font_size=40)
+        start = Button(text="Старт", on_press=self.start)
+        stop = Button(text="Стоп", on_press=self.stop)
+        reset = Button(text="Сброс", on_press=self.reset)
+
+        layout = BoxLayout(orientation="vertical", padding=20, spacing=10)
+        for widget in (self.label, start, stop, reset):
+            layout.add_widget(widget)
+        return layout
+
+    def start(self, instance):
+        if self.event is None:
+            self.event = Clock.schedule_interval(self.tick, 0.1)
+
+    def stop(self, instance):
+        if self.event is not None:
+            self.event.cancel()
+            self.event = None
+
+    def tick(self, dt):
+        self.seconds += dt
+        self.label.text = f"{self.seconds:.1f} с"
+
+    def reset(self, instance):
+        self.stop(instance)
+        self.seconds = 0.0
+        self.label.text = "0.0 с"
+
+if __name__ == "__main__":
+    TimerApp().run()
+```
+
+Что здесь происходит? `Clock.schedule_interval` планирует вызов `tick` каждые 0,1 секунды и возвращает объект-событие, который нужно сохранить, чтобы потом отменить. `dt` — реальное время между вызовами (около 0,1), поэтому сумма `dt` даёт честные секунды даже если система подтормаживает; складывать единицу на каждый вызов было бы неправильно. Проверки `if self.event is None` и `if self.event is not None` защищают от двойного запуска и от отмены несуществующего события. `self.stop(instance)` внутри `reset` переиспользует логику остановки. Обрати внимание на формат `{self.seconds:.1f}` — он всегда показывает один знак после запятой.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -388,4 +493,32 @@ Toga собирает интерфейс из настоящих элемент�
 - Чтобы ускорить выполнение
 * Правильный ответ: Чтобы хранить состояние и логику вместе с раскладкой
 Класс-раскладка инкапсулирует счётчик и обработчики — это шаг к чистой архитектуре.
+
+Какие аргументы получает обработчик, подписанный через slider.bind(value=...)?
+- instance и новое значение
+- только новое значение
+- только сам виджет
+* Правильный ответ: instance и новое значение
+Kivy передаёт и объект-источник, и изменённое значение.
+
+Что делает Clock.schedule_interval(self.tick, 0.1)?
+- Вызывает tick каждые 0,1 секунды и возвращает объект-событие
+- Вызывает tick один раз через 0,1 секунды
+- Останавливает приложение
+* Правильный ответ: Вызывает tick каждые 0,1 секунды и возвращает объект-событие
+Возвращённый объект потом отменяют через cancel().
+
+Что приходит в tick вторым аргументом dt?
+- Время, прошедшее с предыдущего вызова
+- Номер кадра
+- Значение виджета
+* Правильный ответ: Время, прошедшее с предыдущего вызова
+Поэтому сумму dt используют как честное прошедшее время.
+
+Зачем хранить событие в self.event и проверять его на None?
+- Чтобы не запускать второй таймер и не отменять несуществующий
+- Чтобы ускорить отрисовку
+- Чтобы сохранить окно при закрытии
+* Правильный ответ: Чтобы не запускать второй таймер и не отменять несуществующий
+None означает «отсчёт не идёт» — это одновременно флаг и ссылка на событие.
 <!--/QUIZ-->

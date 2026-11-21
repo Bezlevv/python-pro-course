@@ -218,6 +218,21 @@ for name, total in cur.fetchall():
 Аня 2300.0
 ```
 
+## Порядок выполнения запроса
+
+Полезно держать в голове, в каком порядке СУБД разбирает запрос: это объясняет, почему WHERE не видит агрегаты, а псевдонимы из SELECT иногда недоступны.
+
+```mermaid
+flowchart LR
+    A["FROM и JOIN"] --> B["WHERE"]
+    B --> C["GROUP BY"]
+    C --> D["HAVING"]
+    D --> E["Оконные функции"]
+    E --> F["SELECT"]
+    F --> G["ORDER BY"]
+    G --> H["LIMIT"]
+```
+
 ## Итог
 
 Теперь ты умеешь соединять таблицы, агрегировать данные, группировать, фильтровать группы и строить подзапросы. Эти навыки — фундамент любого серьёзного SQL: от отчётов до аналитики. Закрепим практикой.
@@ -237,6 +252,13 @@ for name, total in cur.fetchall():
 
 ### Задача 5
 Напиши функцию `best_order_each()`, которая для каждого пользователя с заказами вычисляет сумму его самого дорогого заказа. Сделай это с помощью коррелированного подзапроса (или CTE с оконной функцией ROW_NUMBER). Верни список кортежей `(name, best)` в порядке имён. Ожидаемый вывод: `[('Аня', 1500.0), ('Борис', 3200.0)]`. Вера в списке отсутствует — у неё нет заказов.
+
+### Задача 6
+Напиши функцию `revenue_share()`, которая работает с той же схемой `users`/`orders`, что и в уроке, и возвращает список кортежей `(name, total, pct, place)`. `total` — сумма заказов пользователя, `pct` — его доля в общей выручке в процентах, округлённая до одного знака (`ROUND(..., 1)`), `place` — место в рейтинге по сумме. Долю считай оконной суммой `SUM(SUM(orders.amount)) OVER ()` или подзапросом `(SELECT SUM(amount) FROM orders)`, а место — через `RANK() OVER (ORDER BY SUM(orders.amount) DESC)`. Пользователей без заказов не включай. Ожидаемый вывод: `[('Борис', 4100.0, 64.1, 1), ('Аня', 2300.0, 35.9, 2)]`.
+
+### Задача 7
+Создай три таблицы: `users(id, name)`, `orders(id, user_id)` и `order_items(order_id, product_id, qty, price)`. Заполни данными: у Ани заказы 101 (две позиции: 2 × 500 и 1 × 800) и 102 (1 × 500), у Бориса — заказ 103 (1 × 3200), у Веры заказов нет. Напиши функцию `order_totals()`, которая одним запросом соединяет три таблицы, считает число позиций и сумму заказа как `SUM(qty * price)`, оставляет только заказы дороже 1000 через `HAVING` и сортирует по сумме по убыванию. Верни список кортежей `(order_id, name, items_count, total)`. Ожидаемый вывод: `[(103, 'Борис', 1, 3200.0), (101, 'Аня', 2, 1800.0)]` — заказ 102 на 500 в результат не попадает.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -254,6 +276,13 @@ for name, total in cur.fetchall():
 
 ### Подсказка 5
 Коррелированный вариант: `SELECT users.name, (SELECT MAX(o.amount) FROM orders o WHERE o.user_id = users.id) AS best FROM users` — добавь условие, чтобы не выводить пользователей без заказов (например, `WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = users.id)`). В варианте с CTE: `WITH ranked AS (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) SELECT users.name, ranked.amount FROM users JOIN ranked ON ranked.user_id = users.id WHERE ranked.rn = 1 ORDER BY users.name`.
+
+### Подсказка 6
+Оконная функция считается после GROUP BY, поэтому внутри неё можно использовать агрегат: `RANK() OVER (ORDER BY SUM(orders.amount) DESC)`. Для доли нужен общий итог: `SUM(SUM(orders.amount)) OVER ()` — внешний SUM собирает групповые суммы, пустые скобки означают «по всему результату». Не забудь умножить на `100.0` до деления, иначе SQLite выполнит целочисленное деление и получит нули.
+
+### Подсказка 7
+Соединяй по цепочке: `orders JOIN users ON users.id = orders.user_id JOIN order_items ON order_items.order_id = orders.id`. Сумма позиции — `qty * price`, итог заказа — `SUM(order_items.qty * order_items.price)`. Группируй по `orders.id`, а фильтр по сумме ставь в `HAVING`, не в `WHERE`: в WHERE агрегат ещё не посчитан. Число позиций — `COUNT(order_items.product_id)`.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -477,6 +506,106 @@ print(best_order_each())
 ```
 
 Что здесь происходит? Подзапрос в SELECT — коррелированный: для каждой строки users он пересчитывается и ссылается на `users.id` внешнего запроса. Он выбирает максимум суммы заказов именно этого пользователя. Условие EXISTS отсеивает пользователей без заказов — иначе Вера попала бы в результат с NULL. Альтернатива через CTE и оконную функцию: `WITH ranked AS (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) SELECT users.name, ranked.amount FROM users JOIN ranked ON ranked.user_id = users.id WHERE ranked.rn = 1 ORDER BY users.name` — тот же результат, но без повторного выполнения подзапроса для каждой строки.
+
+### Разбор 6
+Решение:
+
+```python
+import sqlite3
+
+def revenue_share():
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.executescript("""
+    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        amount REAL NOT NULL
+    );
+    INSERT INTO users (id, name) VALUES
+        (1, 'Аня'), (2, 'Борис'), (3, 'Вера');
+    INSERT INTO orders (id, user_id, amount) VALUES
+        (101, 1, 1500), (102, 1, 800),
+        (103, 2, 3200), (104, 2, 900);
+    """)
+    conn.commit()
+    cur.execute("""
+    SELECT users.name,
+           SUM(orders.amount) AS total,
+           ROUND(100.0 * SUM(orders.amount)
+                 / SUM(SUM(orders.amount)) OVER (), 1) AS pct,
+           RANK() OVER (ORDER BY SUM(orders.amount) DESC) AS place
+    FROM users
+    JOIN orders ON orders.user_id = users.id
+    GROUP BY users.id
+    ORDER BY total DESC
+    """)
+    return cur.fetchall()
+
+print(revenue_share())
+```
+
+Результат:
+
+```
+[('Борис', 4100.0, 64.1, 1), ('Аня', 2300.0, 35.9, 2)]
+```
+
+Что здесь происходит? Запрос сначала группирует заказы по пользователю и считает `SUM(orders.amount)` — это обычная агрегация. Затем в дело вступают оконные функции, которые работают уже поверх готовых групп: `SUM(SUM(orders.amount)) OVER ()` берёт групповые суммы 4100 и 2300 и складывает их в общий итог 6400, не сворачивая сами строки. `RANK() OVER (ORDER BY SUM(orders.amount) DESC)` нумерует группы по убыванию суммы, причём при равных значениях обе получили бы одинаковый ранг, а следующий номер пропустился бы. Умножение на `100.0` обязательно: с целым `100` SQLite выполнил бы целочисленное деление и вернул нули. `ROUND(..., 1)` оставляет один знак после запятой, и доли двух игроков дают в сумме ровно 100%.
+
+### Разбор 7
+Решение:
+
+```python
+import sqlite3
+
+def order_totals():
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.executescript("""
+    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL);
+    CREATE TABLE order_items (
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        qty INTEGER NOT NULL,
+        price REAL NOT NULL
+    );
+    INSERT INTO users (id, name) VALUES
+        (1, 'Аня'), (2, 'Борис'), (3, 'Вера');
+    INSERT INTO orders (id, user_id) VALUES
+        (101, 1), (102, 1), (103, 2);
+    INSERT INTO order_items (order_id, product_id, qty, price) VALUES
+        (101, 10, 2, 500), (101, 20, 1, 800),
+        (102, 10, 1, 500),
+        (103, 30, 1, 3200);
+    """)
+    conn.commit()
+    cur.execute("""
+    SELECT orders.id, users.name,
+           COUNT(order_items.product_id) AS items_count,
+           SUM(order_items.qty * order_items.price) AS total
+    FROM orders
+    JOIN users ON users.id = orders.user_id
+    JOIN order_items ON order_items.order_id = orders.id
+    GROUP BY orders.id
+    HAVING SUM(order_items.qty * order_items.price) > 1000
+    ORDER BY total DESC
+    """)
+    return cur.fetchall()
+
+print(order_totals())
+```
+
+Результат:
+
+```
+[(103, 'Борис', 1, 3200.0), (101, 'Аня', 2, 1800.0)]
+```
+
+Что здесь происходит? Запрос идёт по цепочке связей: `orders` соединяется с `users` по владельцу, а с `order_items` — по номеру заказа. В результате каждая позиция заказа становится отдельной строкой, но `GROUP BY orders.id` снова собирает их в один заказ. Сумма считается не по готовой колонке, а по выражению `qty * price`: две позиции заказа 101 дают 1000 + 800 = 1800, заказ 102 — только 500 и отсекается условием `HAVING`. `COUNT` считает число позиций, и для заказа 101 получается 2. Заказ 103 с одной позицией на 3200 возглавляет список. Обрати внимание: `JOIN order_items` — внутреннее соединение, поэтому заказ без позиций в отчёт не попал бы; если такие нужны, понадобится `LEFT JOIN` и `COALESCE` для суммы.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -541,4 +670,33 @@ COUNT(*) считает строки, COUNT(колонка) — только н�
 - Проверяет, что x больше нуля
 * Правильный ответ: Возвращает x, если он не NULL, иначе 0
 COALESCE заменяет NULL первым ненулевым значением из списка аргументов.
+
+Что делает RANK() OVER (ORDER BY total DESC)?
+- Присваивает строкам ранг по убыванию total, не сворачивая результат
+- Сортирует таблицу физически
+- Суммирует значения total
+- Удаляет дубликаты
+* Правильный ответ: Присваивает строкам ранг по убыванию total, не сворачивая результат
+Оконная функция добавляет колонку к строкам, а не меняет их количество.
+
+Что даёт SUM(SUM(amount)) OVER () в запросе с GROUP BY?
+- Общий итог по всем группам рядом с каждой строкой
+- Сумму внутри каждой группы
+- Среднее по группам
+* Правильный ответ: Общий итог по всем группам рядом с каждой строкой
+Внутренний SUM считает группу, внешний с пустым OVER — сумму всех групп.
+
+Что считает COUNT(DISTINCT orders.id)?
+- Число уникальных номеров заказов, NULL не учитывается
+- Число всех строк, включая дубликаты
+- Сумму номеров заказов
+* Правильный ответ: Число уникальных номеров заказов, NULL не учитывается
+DISTINCT убирает повторы, а COUNT по колонке игнорирует NULL.
+
+Что будет, если в LEFT JOIN справа несколько совпадений?
+- Левая строка повторится столько раз, сколько совпадений справа
+- Вернётся только первое совпадение
+- Запрос завершится ошибкой
+* Правильный ответ: Левая строка повторится столько раз, сколько совпадений справа
+Поэтому сумму по такой выборке легко задвоить — нужна агрегация или отдельный подзапрос.
 <!--/QUIZ-->

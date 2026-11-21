@@ -114,6 +114,21 @@ list_widget.addItem("Второй пункт")
 
 Это удобная база для todo-приложений, журналов, меню.
 
+## Схема: от сигнала до слота
+
+Главная идея PyQt — события не вызывают код напрямую, а проходят через сигналы. Схема показывает полный путь от клика до обновлённого текста:
+
+```mermaid
+flowchart LR
+    A["QApplication"] --> B["QMainWindow"]
+    B --> C["Виджеты в layout"]
+    C --> D["Сигнал: clicked"]
+    D --> E["Слот: обработчик"]
+    E --> F["setText / setValue"]
+    F --> C
+    G["QTimer"] -->|"timeout"| E
+```
+
 ## Итог урока
 
 Мы узнали, как:
@@ -141,6 +156,12 @@ list_widget.addItem("Второй пункт")
 
 ### Задача 5
 Собери todo-приложение: `QListWidget` для задач, поле ввода и кнопка «Добавить». По нажатию текст из поля добавляется в список как новый пункт, поле очищается. Кнопка «Удалить выбранное» удаляет выбранный элемент (`currentRow()` + `takeItem(...)`). Если поле пустое — покажи `QMessageBox.warning`.
+
+### Задача 6
+Сделай таймер обратного отсчёта: ярлык с числом 10, кнопки «Старт» и «Сброс». По «Старт» запускай `QTimer` с интервалом 1000 мс; каждое срабатывание уменьшай число на 1 и показывай его в ярлыке. На нуле останови таймер и покажи `QMessageBox.information` с текстом «Время вышло». Кнопка «Сброс» останавливает таймер и возвращает 10, а повторный «Старт» после нуля начинает отсчёт заново. Ожидаемый вывод: ярлык меняется раз в секунду — `10`, `9`, `8`…, после нуля появляется диалог, а окно не замирает во время отсчёта.
+
+### Задача 7
+Собери «калькулятор сметы»: три поля ввода — цена за штуку, количество и скидка в процентах, кнопка «Рассчитать» и ярлык итога. По нажатию преобразуй первые два значения через `float()` и `int()`, скидку — через `float()` (пустое поле считается нулём), посчитай `price * qty * (1 - discount / 100)` и выведи `Итого: <сумма> ₽` с округлением до двух знаков. При нечисловом вводе показывай `QMessageBox.warning` с текстом «Введите числа», а при скидке вне диапазона 0–100 — сообщение «Скидка от 0 до 100». Ожидаемый вывод: для цены `250`, количества `4` и скидки `10` ярлык показывает `Итого: 900.0 ₽`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -158,6 +179,12 @@ list_widget.addItem("Второй пункт")
 
 ### Подсказка 5
 Для добавления: `if text.strip() == "": QMessageBox.warning(window, "Внимание", "Введите задачу")` иначе `list_widget.addItem(text); line_edit.clear()`. Для удаления: `row = list_widget.currentRow(); if row >= 0: list_widget.takeItem(row)`.
+
+### Подсказка 6
+Заведи `seconds = 10` и `timer = QTimer()`, подключи `timer.timeout.connect(tick)`. В `tick` объяви `global seconds`, уменьши его, обнови `label.setText(str(seconds))` и при `seconds <= 0` вызови `timer.stop()` и `QMessageBox.information(...)`. Старт: если `seconds <= 0`, сначала верни 10, потом `timer.start(1000)`. Сброс: `timer.stop()`, `seconds = 10`, обнови ярлык.
+
+### Подсказка 7
+Создай три `QLineEdit` и один `QLabel` для итога, размести их через `QVBoxLayout`. В обработчике оберни все преобразования в один `try/except ValueError` — так одна ошибка покрывает три поля. Для скидки используй `float(discount_edit.text().replace(",", ".") or 0)`: пустая строка превратится в 0. После расчёта округли результат через `round(total, 2)`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -354,6 +381,116 @@ sys.exit(app.exec())
 ```
 
 Что здесь происходит? `QListWidget` хранит пункты списка. `addItem` добавляет новый, `takeItem(row)` удаляет по индексу. `currentRow()` возвращает индекс выбранного элемента или `-1`, если ничего не выбрано, — мы обрабатываем этот случай отдельно. `QMessageBox.warning` и `information` — модальные диалоги, блокирующие окно до ответа пользователя. Обрати внимание на `.strip()`: пустая строка из пробелов тоже считается пустой. Это полноценное рабочее приложение — добавь кнопки «Выполнено», «Сохранить в файл» — и получится настоящий планировщик.
+
+### Разбор 6
+Решение:
+
+```python
+import sys
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
+                             QPushButton, QVBoxLayout, QMessageBox)
+
+app = QApplication(sys.argv)
+window = QMainWindow()
+window.setWindowTitle("Обратный отсчёт")
+window.resize(300, 200)
+
+central = QWidget()
+layout = QVBoxLayout(central)
+label = QLabel("10")
+label.setStyleSheet("font-size: 40px;")
+start_button = QPushButton("Старт")
+reset_button = QPushButton("Сброс")
+
+seconds = 10
+timer = QTimer()
+
+def tick():
+    global seconds
+    seconds -= 1
+    label.setText(str(seconds))
+    if seconds <= 0:
+        timer.stop()
+        QMessageBox.information(window, "Готово", "Время вышло")
+
+def start():
+    global seconds
+    if seconds <= 0:
+        seconds = 10
+        label.setText(str(seconds))
+    timer.start(1000)
+
+def reset():
+    global seconds
+    timer.stop()
+    seconds = 10
+    label.setText("10")
+
+timer.timeout.connect(tick)
+start_button.clicked.connect(start)
+reset_button.clicked.connect(reset)
+
+for widget in (label, start_button, reset_button):
+    layout.addWidget(widget)
+
+window.setCentralWidget(central)
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? `QTimer` живёт в главном потоке и каждую секунду испускает `timeout`, вызывая `tick`. Переменная `seconds` — глобальная, поэтому внутри обеих функций нужен `global`, иначе Python создаст локальные копии и отсчёт не изменится. Проверка `if seconds <= 0` останавливает таймер: без `timer.stop()` он продолжил бы уходить в отрицательные числа. В `start` есть защита от повторного запуска после нуля — иначе первый же тик дал бы `-1`. Обрати внимание: `QMessageBox.information` модален, но вызывается уже после `stop()`, поэтому отсчёт не продолжается под диалогом.
+
+### Разбор 7
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
+                             QLineEdit, QPushButton, QVBoxLayout, QMessageBox)
+
+app = QApplication(sys.argv)
+window = QMainWindow()
+window.setWindowTitle("Смета")
+window.resize(360, 300)
+
+central = QWidget()
+layout = QVBoxLayout(central)
+
+price_edit = QLineEdit()
+price_edit.setPlaceholderText("Цена за штуку")
+qty_edit = QLineEdit()
+qty_edit.setPlaceholderText("Количество")
+discount_edit = QLineEdit()
+discount_edit.setPlaceholderText("Скидка, % (можно пусто)")
+result = QLabel("Итого: —")
+calc_button = QPushButton("Рассчитать")
+
+def calculate():
+    try:
+        price = float(price_edit.text().replace(",", "."))
+        qty = int(qty_edit.text())
+        discount = float(discount_edit.text().replace(",", ".") or 0)
+    except ValueError:
+        QMessageBox.warning(window, "Ошибка", "Введите числа")
+        return
+    if not 0 <= discount <= 100:
+        QMessageBox.warning(window, "Ошибка", "Скидка от 0 до 100")
+        return
+    total = price * qty * (1 - discount / 100)
+    result.setText(f"Итого: {round(total, 2)} ₽")
+
+calc_button.clicked.connect(calculate)
+
+for widget in (price_edit, qty_edit, discount_edit, result, calc_button):
+    layout.addWidget(widget)
+
+window.setCentralWidget(central)
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? Один `try` покрывает три преобразования: любое нечисловое значение приводит к `ValueError`, и мы показываем одно понятное сообщение вместо трёх разных. Конструкция `float(text or 0)` использует то, что пустая строка ложна: пустое поле скидки превращается в `0`, а не в ошибку. Проверка диапазона `0 <= discount <= 100` — это двойное сравнение Python, которое читается как математическая запись. Результат округляется до копеек через `round(total, 2)`. Обрати внимание на `.replace(",", ".")`: без него `float("12,5")` выбросил бы исключение, хотя пользователь ввёл нормальное число.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -412,4 +549,32 @@ currentRow() возвращает индекс выбранного пункта
 - PySide6 не поддерживает Qt
 * Правильный ответ: Практически одинаковые API, разные компании-владельцы
 PyQt6 (Riverbank) и PySide6 (Qt for Python) почти идентичны по API — код переносится с минимальными правками.
+
+Какой сигнал QTimer вызывает обработчик каждые 1000 мс?
+- timeout
+- clicked
+- tick
+* Правильный ответ: timeout
+QTimer испускает timeout через заданный интервал; его подключают к слоту.
+
+Почему внутри tick() нужна строка global seconds?
+- Чтобы изменить переменную, объявленную вне функции
+- Чтобы создать новую переменную
+- Чтобы ускорить таймер
+* Правильный ответ: Чтобы изменить переменную, объявленную вне функции
+Без global Python создаст локальную переменную и внешнее значение не изменится.
+
+Что произойдёт, если не остановить QTimer на нуле?
+- Отсчёт уйдёт в отрицательные числа
+- Приложение зависнет
+- Таймер сбросится сам
+* Правильный ответ: Отсчёт уйдёт в отрицательные числа
+Без timer.stop() сигнал timeout продолжит приходить каждую секунду.
+
+Зачем в калькуляторе сметы нужен блок try/except вокруг float()?
+- Чтобы обработать нечисловой ввод без падения программы
+- Чтобы ускорить вычисления
+- Чтобы округлить результат
+* Правильный ответ: Чтобы обработать нечисловой ввод без падения программы
+float бросает ValueError на тексте и пустой строке — его ловят и показывают предупреждение.
 <!--/QUIZ-->

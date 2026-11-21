@@ -119,6 +119,21 @@ provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http:/
 
 Точно так же подключаются экспортёры для Jaeger и Zipkin. Меняя один экспортёр, ты меняешь бэкенд — код приложения не трогается.
 
+## Как читать трейс
+
+Трейс — это дерево, а не список. Один HTTP-запрос порождает корневой спан, а внутри него появляются дочерние спаны для каждого шага. Смотри на диаграмму: если `reserve_stock` занимает 800 мс, а `validate_payment` — 20 мс, виновник найден без чтения логов.
+
+```mermaid
+flowchart TD
+    A["GET /orders/42"] --> B["Span: GET /orders/42"]
+    B --> C["validate_payment"]
+    B --> D["reserve_stock"]
+    C --> E["db.query payments"]
+    D --> F["db.query stock"]
+```
+
+У всех узлов один `trace_id`, но разные `span_id`; связь «родитель-ребёнок» хранится в поле `parent_id`. Именно поэтому в бэкенде можно развернуть запрос в дерево и увидеть, какой шаг съел время.
+
 ## Лучшие практики
 
 - Именуй спаны существительными-операциями: `create_order`, `process_payment`, `GET /health`.
@@ -141,6 +156,11 @@ provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http:/
 
 ### Задача 5
 Реализуй ручную передачу контекста между «сервисами» без сети: функция `handle_request(user_id)` создаёт спан `"handle_request"` с атрибутом `user.id`, внутри вызывает функцию `process_payment(user_id)`, которая создаёт дочерний спан `"process_payment"`. Если `user_id` больше 1000, в спане `process_payment` установи статус `StatusCode.ERROR` и добавь атрибут `error.reason="limit_exceeded"`. Напиши тест в `test_traces.py`, который проверяет, что при `user_id=2000` дочерний спан имеет статус `ERROR` и атрибут `error.reason`.
+### Задача 6
+Смоделируй передачу контекста между двумя сервисами без сети. В `propagation_demo.py` настрой `TracerProvider` с `SimpleSpanProcessor(ConsoleSpanExporter())`. В «сервисе A» открой спан `"gateway"`, внутри него сформируй `carrier: dict[str, str] = {}` и вызови `TraceContextTextMapPropagator().inject(carrier)`. Выведи `carrier` — там появится заголовок `traceparent`. В «сервисе B» вызови `ctx = TraceContextTextMapPropagator().extract(carrier)` и открой спан `"orders"` через `tracer.start_as_current_span("orders", context=ctx)`. Сравни `trace_id` обоих спанов и проверь, что `parent_id` спана `orders` равен `span_id` спана `gateway`. Ожидаемый вывод: одинаковый `trace_id` у двух спанов и строка `parent ok`.
+
+### Задача 7
+Научись фиксировать исключения в спане. Напиши функцию `charge_card(amount: int)`, которая при `amount <= 0` бросает `ValueError("amount must be positive")`. В `test_exceptions.py` настрой `InMemorySpanExporter` с `SimpleSpanProcessor`, оберни вызов в `with tracer.start_as_current_span("charge_card") as span:` и в `except ValueError as exc:` вызови `span.record_exception(exc)` и `span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))`. Проверь три вещи: статус экспортированного спана — `ERROR`, среди событий есть `exception` с атрибутом `exception.type == "ValueError"`, а `status.description` содержит текст ошибки. Ожидаемый вывод: `1 passed` и одно событие `exception` в спане.
 <!--/TASK-->
 
 <!--HINT-->
@@ -158,6 +178,11 @@ provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http:/
 
 ### Подсказка 5
 Статус спана: `span.set_status(trace.Status(trace.StatusCode.ERROR))`. Проверка: `assert exported[1].status.status_code == trace.StatusCode.ERROR` (или `span.status.status_code`). Имя дочернего спана — `"process_payment"`, атрибут — `span.set_attribute("error.reason", "limit_exceeded")`.
+### Подсказка 6
+Пропагатор берётся из `opentelemetry.trace.propagation.tracecontext.TraceContextTextMapPropagator`. `inject(carrier)` нужно вызывать **внутри** `with`-блока спана `gateway`, иначе текущего контекста нет и заголовок не запишется. `extract(carrier)` возвращает `Context`, который передаётся в `start_as_current_span(..., context=ctx)`; без этого параметра спан `orders` станет новым корневым трейсом.
+
+### Подсказка 7
+`record_exception` добавляет событие с именем `exception` и атрибутами `exception.type`, `exception.message`, `exception.stacktrace`. Статус проверяй как `span.status.status_code == StatusCode.ERROR`, а описание — `span.status.description`. В тесте не забудь `force_flush()` у провайдера или используй `SimpleSpanProcessor`, который экспортирует спан сразу при завершении.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -349,6 +374,79 @@ def test_error_status():
 ```
 
 Что здесь происходит? Функция `process_payment` создаёт дочерний спан. Так как он создаётся внутри спана `handle_request`, он автоматически становится его ребёнком — родительская связь определяется текущим контекстом, а не аргументами. Статус `ERROR` — это не исключение, а явное сообщение о неудаче, которое можно использовать для алертов. В тесте мы проверяем и статус, и атрибут причины — такой спан сразу виден в трейсе.
+### Разбор 6
+Решение (`propagation_demo.py`):
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+provider = TracerProvider(resource=Resource.create({"service.name": "demo"}))
+provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+trace.set_tracer_provider(provider)
+tracer = trace.get_tracer("app")
+propagator = TraceContextTextMapPropagator()
+
+with tracer.start_as_current_span("gateway") as gateway:
+    carrier: dict[str, str] = {}
+    propagator.inject(carrier)
+    print("carrier:", carrier)
+    gateway_ctx = gateway.get_span_context()
+
+ctx = propagator.extract(carrier)
+with tracer.start_as_current_span("orders", context=ctx) as orders:
+    orders_ctx = orders.get_span_context()
+
+print("same trace:", gateway_ctx.trace_id == orders_ctx.trace_id)
+print("parent ok:", orders.parent.span_id == gateway_ctx.span_id)
+```
+
+Пример вывода:
+
+```text
+carrier: {'traceparent': '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'}
+same trace: True
+parent ok: True
+```
+
+Что здесь происходит? Заголовок `traceparent` — это компактная упаковка трёх полей: версия, `trace_id`, `span_id` и флаги. `inject` читает текущий контекст и записывает строку в обычный словарь; в реальном сервисе этот словарь стал бы HTTP-заголовками. `extract` делает обратную операцию и возвращает `Context`, а `start_as_current_span(..., context=ctx)` строит спан так, будто он родился внутри чужого процесса. Обрати внимание: без `context=ctx` спан `orders` получил бы новый `trace_id`, и в бэкенде мы увидели бы два несвязанных трейса вместо одного сквозного. Сравнение `orders.parent.span_id` с `gateway_ctx.span_id` — самая надёжная проверка, что связь восстановлена.
+
+### Разбор 7
+Решение (`test_exceptions.py`):
+
+```python
+import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from billing import charge_card
+
+def test_exception_is_recorded():
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    with tracer.start_as_current_span("charge_card") as span:
+        try:
+            charge_card(0)
+        except ValueError as exc:
+            span.record_exception(exc)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))
+
+    finished = exporter.get_finished_spans()[0]
+    assert finished.status.status_code == trace.StatusCode.ERROR
+    assert finished.status.description == "amount must be positive"
+    assert finished.events[0].name == "exception"
+    assert finished.events[0].attributes["exception.type"] == "ValueError"
+```
+
+Что здесь происходит? `record_exception` не «глотает» ошибку и не мешает ей распространяться — он просто добавляет в спан событие с типом, сообщением и stacktrace. `set_status` отдельно помечает весь спан как неуспешный: без него спан останется `UNSET`, и алерты по доле ошибок его не увидят. `SimpleSpanProcessor` экспортирует спан сразу после `end()`, поэтому `get_finished_spans()` уже содержит запись, и вызывать `force_flush()` не нужно. В проде ту же информацию можно получить, если настроен `BatchSpanProcessor`: главное — не забыть корректно завершить провайдер при остановке приложения, иначе буфер потеряется.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -421,4 +519,31 @@ start_as_current_span делает спан текущим, и все вложе
 - Удаляет спан из трейса
 * Правильный ответ: Помечает спан как завершившийся с ошибкой
 Статус ERROR сигнализирует о неудаче без сообщения исключения.
+Что записывает TraceContextTextMapPropagator().inject(carrier)?
+- Заголовок traceparent с trace_id и span_id
+- Тело HTTP-запроса
+- JSON со всеми атрибутами спана
+* Правильный ответ: Заголовок traceparent с trace_id и span_id
+inject упаковывает текущий контекст в carrier, обычно это dict с ключом traceparent.
+
+Зачем передавать context=ctx в start_as_current_span при приёме запроса?
+- Чтобы спан продолжил существующий трейс, а не начал новый
+- Чтобы ускорить экспорт
+- Чтобы отключить сэмплирование
+* Правильный ответ: Чтобы спан продолжил существующий трейс, а не начал новый
+Без переданного контекста спан станет корневым и получит новый trace_id.
+
+Что делает span.record_exception(exc)?
+- Пробрасывает исключение дальше
+- Добавляет в спан событие exception с типом и stacktrace
+- Меняет статус спана на ERROR автоматически
+* Правильный ответ: Добавляет в спан событие exception с типом и stacktrace
+Статус нужно выставлять отдельно через set_status.
+
+Почему в проде важно корректно завершать TracerProvider?
+- Иначе BatchSpanProcessor не отправит накопленные спаны
+- Иначе изменится trace_id
+- Иначе перестанут работать атрибуты
+* Правильный ответ: Иначе BatchSpanProcessor не отправит накопленные спаны
+Буфер отправляется пакетами; при резкой остановке процесса последние спаны теряются.
 <!--/QUIZ-->

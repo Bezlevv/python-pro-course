@@ -151,6 +151,14 @@ def create_book(request):
 
 Данные запроса лежат в `request.data` (для JSON, формы, `multipart`) и в `request.query_params` (для GET-параметров из URL).
 
+```mermaid
+flowchart LR
+    A["Клиент: GET /api/hello/"] --> B["urls.py"]
+    B --> C["APIView или @api_view"]
+    C --> D["Response"]
+    D --> E["JSON и код 200"]
+```
+
 ## Итог
 
 Сегодня мы разобрались, что такое REST API, установили DRF, создали модель, написали первую вьюху на `APIView` и с декоратором `@api_view`, а также узнали про коды состояния. В следующем уроке ты познакомишься с сериализаторами — сердцем DRF, которое превращает объекты моделей в JSON и обратно.
@@ -170,6 +178,11 @@ def create_book(request):
 
 ### Задача 5
 Напиши вьюху на базе `APIView` с методом `post`, которая создаёт запись в модели `Quote` из данных запроса (`request.data["text"]` и `request.data["author"]`) и возвращает `201 Created` вместе с данными созданной записи. Если поля `text` или `author` отсутствуют, верни `400 Bad Request` с сообщением об ошибке. Проверь оба сценария.
+### Задача 6
+Напиши функцию-вьюху с `@api_view(["GET"])`, которая читает имя из query-параметра: `name = request.query_params.get("name", "мир")`. Ответ должен быть `{"message": f"Привет, {name}!"}`. Пропиши маршрут `/api/greet/`, запусти сервер и проверь два запроса: `/api/greet/?name=Аня` вернёт `{"message": "Привет, Аня!"}`, а `/api/greet/` без параметра — `{"message": "Привет, мир!"}`. Обрати внимание: `request.query_params` — это DRF-аналог `request.GET`.
+
+### Задача 7
+Добавь вьюху `QuoteDetailView(APIView)` с методами `get` и `delete` для одной цитаты по id. В `get` получи объект через `get_object_or_404(Quote, pk=pk)` и верни словарь с `id`, `text` и `author`; в `delete` удали объект и верни `204 No Content` с пустым телом. Пропиши маршрут `/api/quotes/<int:pk>/`. Проверь три сценария: существующий id → `200`, удаление → `204`, повторный GET → `404`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -187,6 +200,11 @@ def create_book(request):
 
 ### Подсказка 5
 Данные из запроса лежат в `request.data` — это словарь. Проверяй наличие ключа через `if "text" not in request.data:`. Для ошибки верни `Response({"error": "..."}, status=status.HTTP_400_BAD_REQUEST)`.
+### Подсказка 6
+`request.query_params` — это словарь GET-параметров. Метод `.get("name", "мир")` возвращает значение или запасной вариант, если ключа нет. Декоратор `@api_view(["GET"])` ставится над функцией, а возвращать нужно `Response({...})`. Маршрут — `path("api/greet/", greet)` без `as_view()`, потому что это функция.
+
+### Подсказка 7
+`get_object_or_404` импортируется из `django.shortcuts`. В `delete` после `quote.delete()` верни `Response(status=status.HTTP_204_NO_CONTENT)` — тело пустое. Не забудь, что методы класса получают `self, request, pk`. При повторном GET `get_object_or_404` сам бросит `Http404`, а DRF превратит его в JSON-ответ `404`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -306,6 +324,73 @@ class QuoteCreateView(APIView):
 ```
 
 Что здесь происходит? Метод `post` читает данные из `request.data`. Мы проверяем наличие обязательных ключей: если их нет, возвращаем `400 Bad Request`. Если всё на месте — создаём запись через `Quote.objects.create(...)` и возвращаем `201 Created` с данными созданной цитаты. Код 201 — стандартный ответ на создание ресурса, в отличие от 200, который означает просто успешный запрос.
+### Разбор 6
+Решение:
+
+```python
+# books/views.py
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+@api_view(["GET"])
+def greet(request):
+    name = request.query_params.get("name", "мир")
+    return Response({"message": f"Привет, {name}!"})
+```
+
+```python
+# urls.py
+from django.urls import path
+from books.views import greet
+
+urlpatterns = [
+    path("api/greet/", greet),
+]
+```
+
+Запуск: `python manage.py runserver`. Результат: `GET /api/greet/?name=Аня` → `{"message": "Привет, Аня!"}`, `GET /api/greet/` → `{"message": "Привет, мир!"}`.
+
+Что здесь происходит? `request.query_params` в DRF — это обёртка над `request.GET`, которая всегда возвращает строки и умеет работать с разными парсерами. Метод `.get` с вторым аргументом задаёт значение по умолчанию, поэтому отсутствие параметра не приводит к `None` в строке приветствия. `@api_view(["GET"])` не только ограничивает метод, но и подготавливает `request` к работе с DRF: без декоратора у обычной Django-вьюхи не было бы `query_params` и `Response` не получил бы контекст для рендеринга. Обрати внимание на кодировку: кириллица в URL передаётся процентным кодированием, но DRF декодирует значение автоматически, поэтому в ответе ты видишь нормальный текст.
+
+### Разбор 7
+Решение:
+
+```python
+# books/views.py
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Quote
+
+
+class QuoteDetailView(APIView):
+    def get(self, request, pk):
+        quote = get_object_or_404(Quote, pk=pk)
+        return Response({
+            "id": quote.id,
+            "text": quote.text,
+            "author": quote.author,
+        })
+
+    def delete(self, request, pk):
+        quote = get_object_or_404(Quote, pk=pk)
+        quote.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+```
+
+```python
+# urls.py
+from django.urls import path
+from books.views import QuoteDetailView
+
+urlpatterns = [
+    path("api/quotes/<int:pk>/", QuoteDetailView.as_view()),
+]
+```
+
+Что здесь происходит? `APIView` вызывает метод, совпадающий с HTTP-методом запроса, и передаёт в него именованные аргументы из URL — здесь `pk`. `get_object_or_404` пытается найти запись и, если её нет, бросает `Http404`; DRF перехватывает его и отдаёт клиенту JSON с кодом `404` вместо HTML-страницы. В `delete` мы сначала получаем объект, чтобы не удалять «вслепую» несуществующую запись, а затем возвращаем `204 No Content` — успех без тела ответа. Повторный GET после удаления снова проходит через `get_object_or_404` и даёт `404`, что и подтверждает фактическое удаление. Разделение на методы делает контракт явным: один URL — два разных действия с разными кодами ответа.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -378,4 +463,31 @@ JSON не поддерживает тип datetime, поэтому нужно п
 - .json
 * Правильный ответ: .py
 Django-проекты пишутся на Python и имеют расширение .py.
+Где в DRF лежат GET-параметры из адресной строки?
+- В request.query_params
+- В request.data
+- В request.body
+* Правильный ответ: В request.query_params
+request.query_params — DRF-обёртка над GET-параметрами, например ?name=Аня.
+
+Что сделает get_object_or_404(Quote, pk=5), если записи нет?
+- Бросит Http404, который DRF вернёт как JSON-ответ 404
+- Вернёт None
+- Создаст новую запись
+* Правильный ответ: Бросит Http404, который DRF вернёт как JSON-ответ 404
+DRF перехватывает Http404 и отдаёт клиенту корректный ответ 404.
+
+Что вернёт APIView, если в классе определён только метод get, а пришёл POST?
+- 405 Method Not Allowed
+- 200 OK с пустым телом
+- 500 Internal Server Error
+* Правильный ответ: 405 Method Not Allowed
+APIView сопоставляет HTTP-метод с методом класса и возвращает 405, если его нет.
+
+Что означает код ответа 204 No Content?
+- Запрос успешен, тело ответа пустое
+- Ресурс не найден
+- Данные невалидны
+* Правильный ответ: Запрос успешен, тело ответа пустое
+204 часто возвращают после успешного DELETE.
 <!--/QUIZ-->

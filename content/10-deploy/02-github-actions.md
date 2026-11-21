@@ -112,6 +112,18 @@ jobs:
 
 Блок `needs: test` гарантирует порядок: образ соберётся только после зелёных тестов. А `secrets.GITHUB_TOKEN` — это автоматически создаваемый секрет GitHub, пароль от которого не нужно хранить самому.
 
+Схема типичного конвейера с зависимостями между job:
+
+```mermaid
+flowchart TD
+    A["Событие: push или pull_request"] --> B["Workflow ci.yml"]
+    B --> C["Job test"]
+    B --> D["Job lint"]
+    C --> E["Job docker"]
+    D --> E
+    E --> F["Образ в ghcr.io"]
+```
+
 ## Итог урока
 
 Мы разобрали устройство workflow: события, задачи, шаги, матрицу версий, кэширование и публикацию Docker-образа. Теперь каждый пуш в `main` будет автоматически запускать тесты — а ты узнаешь о провале до того, как код попадёт в продакшен.
@@ -139,6 +151,11 @@ jobs:
 
 ### Задача 5
 В job `test` после шага запуска pytest добавь два шага: сначала запусти `pytest --junitxml=junit.xml` (отчёт в формате JUnit), затем загрузи отчёт как артефакт через `actions/upload-artifact@v4` с `name: pytest-results` и `path: junit.xml`. Запушь, дождись зелёного прогона и открой его страницу: на вкладке Summary будет ссылка на артефакт `pytest-results`. Скачай его и открой `junit.xml`. Ожидаемый результат: артефакт доступен для скачивания, в XML видны результаты всех тестов.
+### Задача 6
+Добавь в workflow job `integration`, который проверяет приложение с настоящей базой данных. Опиши сервис-контейнер: `services: postgres: image: postgres:16-alpine`, `env: POSTGRES_PASSWORD: secret`, `ports: ["5432:5432"]`, `options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5`. Шаги: checkout, setup-python с кэшем pip, установка зависимостей, затем запуск `pytest tests/test_db.py -v` с переменной окружения `DATABASE_URL: postgresql://postgres:secret@localhost:5432/postgres`. Ожидаемый результат: job зелёный, в логе инициализации сервиса видно `database system is ready to accept connections`, а интеграционные тесты подключаются к базе на `localhost:5432` и проходят.
+
+### Задача 7
+Сделай проверку новой версии Python неблокирующей. В `strategy.matrix` добавь секцию `include` с записью `- python-version: "3.13"` и `experimental: true`, а к job `test` добавь строку `continue-on-error: ${{ matrix.experimental == true }}`. Запушь изменения и открой прогон на вкладке Actions. Ожидаемый результат: в матрице три job — 3.11, 3.12 и 3.13; если на 3.13 тесты падают, её строка красная, но сам workflow считается успешным, а job `docker` всё равно запускается. Для записей без поля `experimental` выражение даёт `false`, поэтому 3.11 и 3.12 остаются блокирующими.
 <!--/TASK-->
 
 <!--HINT-->
@@ -156,6 +173,11 @@ Workflow лежит в `.github/workflows/ci.yml` — другого пути Gi
 
 ### Подсказка 5
 Артефакты загружаются действием `actions/upload-artifact@v4`: `name` — имя, под которым артефакт появится на вкладке Summary, `path` — путь к файлу относительно корня репозитория. Флаг `--junitxml=junit.xml` заставляет pytest писать отчёт в XML, а не только в консоль.
+### Подсказка 6
+Сервисы описываются на уровне job, рядом с `runs-on`, а не внутри `steps`. Порт из `ports` пробрасывается на `localhost` runner, поэтому в строке подключения хост — `localhost`. Параметр `options` передаёт аргументы в `docker create`; без health-check шаги могут начаться раньше, чем база примет соединения.
+
+### Подсказка 7
+`include` добавляет новые комбинации в матрицу, даже если такой версии нет в основном списке. Выражение `continue-on-error` вычисляется для каждого экземпляра job отдельно, а `matrix.experimental` у старых записей равно `null` — сравнивай именно с `true`, чтобы не получить истину случайно.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -299,6 +321,71 @@ jobs:
 Ожидаемый результат: на странице успешного прогона, внизу раздела Summary, появляется блок Artifacts со ссылкой `pytest-results`, по которой можно скачать архив с файлом `junit.xml`.
 
 Что здесь происходит? Флаг `--junitxml=junit.xml` заставляет pytest дополнительно записать результаты тестов в XML-файл в формате JUnit — машиночитаемом формате, который понимают многие инструменты. Действие `actions/upload-artifact@v4` сохраняет этот файл и привязывает его к конкретному прогону workflow. Артефакты хранятся ограниченное время (по умолчанию 90 дней) и полезны, когда нужно разобраться в провале: можно скачать отчёт и посмотреть, какие тесты упали и с каким сообщением, даже не имея доступа к логам прогона.
+### Разбор 6
+Job с сервисом Postgres:
+
+```yaml
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: secret
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Интеграционные тесты
+        env:
+          DATABASE_URL: postgresql://postgres:secret@localhost:5432/postgres
+        run: pytest tests/test_db.py -v
+```
+
+Ожидаемый результат: в логе job появляется блок `Initialize containers` с сообщением `database system is ready to accept connections`, затем тесты подключаются к базе и проходят — job зелёный.
+
+Что здесь происходит? Блок `services` говорит GitHub поднять рядом с job вспомогательные контейнеры в той же сети. Postgres публикуется на `localhost:5432` runner, поэтому приложение подключается как к обычной локальной базе. `options` передаёт аргументы `docker create`: health-check `pg_isready` проверяет готовность базы, и GitHub ждёт его успеха, прежде чем запускать шаги. Без health-check первый же тест мог бы упасть с «connection refused», хотя база стартует всего на секунду позже. Переменная `DATABASE_URL` задаётся через `env` шага и не попадает в код — тот же принцип, что и в уроке про `.env`. Пароль здесь учебный; в реальном проекте его берут из `secrets`.
+
+### Разбор 7
+Изменённая секция `test`:
+
+```yaml
+  test:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental == true }}
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+        include:
+          - python-version: "3.13"
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements-dev.txt
+      - run: pytest
+```
+
+Ожидаемый результат: в прогоне три строки job `test` — `3.11`, `3.12` и `3.13`. Если на 3.13 тесты падают, строка помечена красным, но workflow в целом зелёный, а `docker` запускается.
+
+Что здесь происходит? `include` умеет не только дополнять существующие комбинации, но и создавать новые: запись с `python-version: "3.13"` не совпадает ни с одной из основного списка, поэтому превращается в отдельный экземпляр job. `continue-on-error` вычисляется отдельно для каждого экземпляра: у 3.13 `matrix.experimental` равно `true`, у остальных — `null`, и сравнение `null == true` даёт `false`. Так новая версия проверяется, но не блокирует мерж и публикацию образа. Когда 3.13 станет стабильной, достаточно убрать `experimental` и перенести версию в основной список — тогда падения снова начнут ронять конвейер.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -356,4 +443,31 @@ GitHub ищет workflow именно в `.github/workflows/` — файлы и�
 - Указывает версию Python
 * Правильный ответ: Выбирает операционную систему виртуальной машины runner
 `runs-on` определяет среду, в которой выполнится job, — например, Ubuntu, Windows или macOS.
+Что описывает блок services в job?
+- Вспомогательные контейнеры (например, базу данных), доступные job по localhost
+- Список секретов репозитория
+- Набор runner, на которых выполнится job
+* Правильный ответ: Вспомогательные контейнеры (например, базу данных), доступные job по localhost
+GitHub поднимает их рядом с job в общей сети и ждёт health-check, прежде чем запускать шаги.
+
+Что делает continue-on-error: true у job?
+- Позволяет job упасть, не помечая весь workflow как проваленный
+- Повторяет job до успешного завершения
+- Отключает запуск следующих job
+* Правильный ответ: Позволяет job упасть, не помечая весь workflow как проваленный
+Это удобно для экспериментальных версий и необязательных проверок: результат виден, но не блокирует конвейер.
+
+Какой триггер позволяет запускать workflow вручную кнопкой Run workflow?
+- workflow_dispatch
+- pull_request
+- schedule
+* Правильный ответ: workflow_dispatch
+workflow_dispatch добавляет кнопку ручного запуска и позволяет передавать входные параметры через блок inputs.
+
+Что произойдёт с job docker, если job test завершится с ошибкой?
+- docker не запустится, потому что needs требует успешного завершения test
+- docker запустится всё равно
+- docker запустится, но только для pull_request
+* Правильный ответ: docker не запустится, потому что needs требует успешного завершения test
+`needs` строит жёсткую зависимость: при падении предка зависимая job пропускается.
 <!--/QUIZ-->

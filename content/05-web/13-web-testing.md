@@ -149,6 +149,21 @@ def test_add_params(a, b, expected):
 
 Хороший ориентир — покрыть главные сценарии каждого эндпоинта: успешный ответ, ошибки валидации, отсутствие доступа, пустые данные. Тесты — это ещё и документация: читая их, новый разработчик понимает, как должно вести себя приложение.
 
+## Как устроен один прогон pytest
+
+Соберём схему, которая объясняет, почему тесты вообще изолированы друг от друга.
+
+```mermaid
+flowchart TD
+    A["pytest находит test_*.py"] --> B["Фикстура db_session: база в памяти"]
+    B --> C["Фикстура client: dependency_overrides"]
+    C --> D["TestClient вызывает приложение в памяти"]
+    D --> E["assert: статус и JSON"]
+    E --> F["Отчёт: passed / failed"]
+```
+
+Каждый тест получает свежую фикстуру: база создаётся заново, подмена зависимости ставится и снимается вокруг одного теста — поэтому порядок запуска не важен.
+
 ## Итог урока
 
 Мы узнали, как устроен pytest (тесты, фикстуры, параметризация), как тестировать FastAPI через `TestClient` без запуска сервера, как изолировать тесты от базы и подменять внешние сервисы через `monkeypatch`.
@@ -175,6 +190,11 @@ def test_add_params(a, b, expected):
 
 ### Задача 5
 Напиши `test_tasks_crud.py` для приложения `tasks_app.py`: один тест, который последовательно проверяет: 1) `POST /tasks` с `{"title": "Купить молоко"}` → 201; 2) `GET /tasks/{id}` → 200 и тот же title; 3) `GET /tasks/999` → 404; 4) `DELETE /tasks/{id}` → 204; 5) `GET /tasks/{id}` после удаления → 404. Используй фикстуры из задачи 2 (или продублируй их). Запусти `pytest test_tasks_crud.py -v`.
+### Задача 6
+Создай приложение `secure_app.py` и тесты к нему. В приложении: `SECRET_KEY = "test-secret"`, словарь пользователей `{"1": {"username": "anya"}}`, зависимость `get_current_user`, которая через `OAuth2PasswordBearer(tokenUrl="/login")` берёт токен, декодирует его (`jwt.decode` с `algorithms=["HS256"]`) и возвращает пользователя, а при `jwt.PyJWTError` или неизвестном `sub` отдаёт `401`; эндпоинт `GET /me`, возвращающий `{"username": ...}`. В `test_auth.py` напиши три теста: запрос без заголовка `Authorization` → `401`; запрос с валидным токеном, собранным прямо в тесте через `jwt.encode` (срок +1 час) → `200` и `{"username": "anya"}`; запрос с токеном, подписанным чужим ключом `"чужой-секрет"` → `401`. Запусти `pytest test_auth.py -v` и убедись, что все три теста зелёные.
+
+### Задача 7
+Создай приложение `notify_app.py`: множество `registered` на уровне модуля, функция `send_welcome_email(email)`, которая печатает `Письмо для <email>`, и `POST /users` с телом `{"email": ...}`: при повторе адреса — `409` с detail «Уже зарегистрирован», иначе адрес добавляется в `registered`, вызывается `send_welcome_email` и возвращается `201`. В `test_notify.py` используй `unittest.mock.Mock`: подмени функцию через `monkeypatch.setattr("notify_app.send_welcome_email", mock)` и проверь `mock.call_count == 1` и `mock.assert_called_once_with(...)`; вторым тестом проверь, что повторный POST даёт `409`, а `call_count` остаётся равным 1. Добавь `autouse`-фикстуру, очищающую `notify_app.registered` перед каждым тестом. Запусти `pytest test_notify.py -v` и опиши вывод.
 <!--/TASK-->
 
 <!--HINT-->
@@ -192,6 +212,11 @@ def test_add_params(a, b, expected):
 
 ### Подсказка 5
 Для GET/DELETE по id бери id из предыдущего ответа: `created = response.json()["id"]`. DELETE возвращает 204 — тело пустое. После удаления выборка по id должна давать 404: обрабатывай это в приложении через `HTTPException(status_code=404)`.
+### Подсказка 6
+Токен в тесте собирай так же, как в приложении: `jwt.encode({"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(hours=1)}, SECRET_KEY, algorithm="HS256")`. Заголовок передавай словарём: `client.get("/me", headers={"Authorization": f"Bearer {token}"})`. Для проверки «чужой подписи» подставь другой секрет — получишь `InvalidSignatureError`, который приложение превратит в `401`. Отдельный тест на отсутствие токена не передаёт заголовок вообще — `OAuth2PasswordBearer` сам вернёт `401`.
+
+### Подсказка 7
+`Mock` из `unittest.mock` записывает вызовы: `mock.call_count`, `mock.assert_called_once_with("anya@example.com")`, `mock.call_args_list`. Подмена работает, если приложение обращается к функции как к глобальному имени модуля — `monkeypatch.setattr("notify_app.send_welcome_email", mock)` меняет именно его. `autouse`-фикстура выполняется для каждого теста: `@pytest.fixture(autouse=True)` и внутри `notify_app.registered.clear()`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -475,6 +500,150 @@ def delete_task(task_id: int, session=Depends(get_session)):
 ```
 
 Разбор: тест проверяет весь жизненный цикл записи: создание (201 и корректное тело), чтение по id (200 и тот же объект), обработку несуществующего id (404), удаление (204 — пустое тело) и повторное чтение после удаления (снова 404). В приложении `session.get(Task, task_id)` возвращает None для отсутствующей записи, и мы отдаём 404. Число 999 выбрано заведомо несуществующим — id выдаютя автоматически и вряд ли дойдут до 999 в тесте. Такой интеграционный тест связывает все операции CRUD и защищает от регрессий при рефакторинге.
+### Разбор 6
+Приложение `secure_app.py`:
+
+```python
+import jwt
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from datetime import datetime, timedelta, timezone
+
+app = FastAPI()
+SECRET_KEY = "test-secret"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
+USERS = {"1": {"username": "anya"}}
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Неверный токен")
+    user = USERS.get(payload["sub"])
+    if user is None:
+        raise HTTPException(status_code=401, detail="Неверный токен")
+    return user
+
+@app.get("/me")
+def me(user: dict = Depends(get_current_user)):
+    return user
+```
+
+Тесты `test_auth.py`:
+
+```python
+import jwt
+import pytest
+from datetime import datetime, timedelta, timezone
+from fastapi.testclient import TestClient
+from secure_app import app, SECRET_KEY
+
+client = TestClient(app)
+
+def make_token(sub="1", secret=SECRET_KEY):
+    return jwt.encode(
+        {"sub": sub, "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        secret,
+        algorithm="HS256",
+    )
+
+def test_me_without_token():
+    assert client.get("/me").status_code == 401
+
+def test_me_with_valid_token():
+    response = client.get("/me", headers={"Authorization": f"Bearer {make_token()}"})
+    assert response.status_code == 200
+    assert response.json() == {"username": "anya"}
+
+def test_me_with_foreign_signature():
+    token = make_token(secret="чужой-секрет")
+    response = client.get("/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+```
+
+Результат `pytest test_auth.py -v`:
+
+```
+test_auth.py::test_me_without_token PASSED
+test_auth.py::test_me_with_valid_token PASSED
+test_auth.py::test_me_with_foreign_signature PASSED
+3 passed
+```
+
+Разбор: мы тестируем не «внутренности» зависимости, а поведение границы приложения — то, что видит клиент. Три теста закрывают три состояния: токена нет (401 от `OAuth2PasswordBearer`), токен валиден (200 и данные), токен подписан не нашим ключом (401 от перехвата `PyJWTError`). Токен собирается прямо в тесте, а не запросом на `/login`: тест остаётся быстрым и проверяет ровно охрану эндпоинта, а не работу логина. Если завтра кто-то поменяет код ошибки с 401 на 403 или начнёт пропускать токены с чужой подписью, упадут именно эти тесты — это и есть защита от регрессий в безопасности.
+
+### Разбор 7
+Приложение `notify_app.py`:
+
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI()
+registered: set[str] = set()
+
+def send_welcome_email(email: str):
+    print(f"Письмо для {email}")
+
+class UserIn(BaseModel):
+    email: str
+
+@app.post("/users", status_code=201)
+def create_user(data: UserIn):
+    if data.email in registered:
+        raise HTTPException(status_code=409, detail="Уже зарегистрирован")
+    registered.add(data.email)
+    send_welcome_email(data.email)
+    return {"email": data.email}
+```
+
+Тесты `test_notify.py`:
+
+```python
+import pytest
+from unittest.mock import Mock
+from fastapi.testclient import TestClient
+import notify_app
+from notify_app import app
+
+client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def clean_registry():
+    notify_app.registered.clear()
+    yield
+
+def test_email_sent_once(monkeypatch):
+    mock = Mock()
+    monkeypatch.setattr("notify_app.send_welcome_email", mock)
+
+    response = client.post("/users", json={"email": "anya@example.com"})
+
+    assert response.status_code == 201
+    assert mock.call_count == 1
+    mock.assert_called_once_with("anya@example.com")
+
+def test_duplicate_not_sent_twice(monkeypatch):
+    mock = Mock()
+    monkeypatch.setattr("notify_app.send_welcome_email", mock)
+
+    client.post("/users", json={"email": "anya@example.com"})
+    response = client.post("/users", json={"email": "anya@example.com"})
+
+    assert response.status_code == 409
+    assert mock.call_count == 1
+```
+
+Результат `pytest test_notify.py -v`:
+
+```
+test_notify.py::test_email_sent_once PASSED
+test_notify.py::test_duplicate_not_sent_twice PASSED
+2 passed
+```
+
+Разбор: `Mock` — это объект-«шпион»: он ничего не делает, но записывает каждый вызов вместе с аргументами. `assert_called_once_with` — более строгая проверка, чем `call_count == 1`: она сверяет и количество, и аргументы, поэтому поймает случай, когда письмо ушло не тому адресу. Второй тест важен бизнес-логикой: при повторной регистрации письмо не должно уходить второй раз, и `call_count == 1` доказывает это без реальной почты. `autouse`-фикстура очищает глобальное множество `registered`: без неё второй тест упал бы с 409 уже на первом запросе, потому что первый тест оставил там адрес. Это тот самый принцип из урока — тесты не должны зависеть друг от друга и от порядка запуска.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -541,4 +710,35 @@ pytest сканирует модули test_*.py и запускает все ф
 - Скрипт запуска pytest
 * Правильный ответ: Функция, которая готовит окружение и подставляется в тесты автоматически
 Фикстуры, например db_session или client, описывают подготовку и уборку окружения один раз и переиспользуются в тестах.
+Почему тесты не должны зависеть от порядка выполнения?
+- Потому что pytest может запускать их по одному или в другом порядке, и результат станет непредсказуемым
+- Потому что так требует PEP 8
+- Потому что иначе они медленнее
+- Потому что TestClient не работает с упорядоченными тестами
+* Правильный ответ: Потому что pytest может запускать их по одному или в другом порядке, и результат станет непредсказуемым
+Общее состояние (база, список, файл) должно готовиться фикстурой для каждого теста — иначе «зелёный» прогон превращается в лотерею.
+
+Зачем после теста вызывать app.dependency_overrides.clear()?
+- Чтобы подмена зависимости не протекла в следующие тесты
+- Чтобы ускорить приложение
+- Чтобы закрыть базу
+- Чтобы сбросить кэш браузера
+* Правильный ответ: Чтобы подмена зависимости не протекла в следующие тесты
+Если не снять подмену, следующие тесты будут получать чужую тестовую сессию и вести себя странно.
+
+Что проверяет конструкция with pytest.raises(httpx.HTTPStatusError)?
+- Что код внутри блока поднимает именно это исключение
+- Что код вернул True
+- Что сервер доступен
+- Что тест пропущен
+* Правильный ответ: Что код внутри блока поднимает именно это исключение
+Если исключение не возникнет (или будет другого типа), pytest пометит тест как упавший.
+
+Зачем в тесте проверять не только статус-код ошибки, но и тело ответа (поле detail)?
+- Чтобы зафиксировать контракт: какой именно текст и структуру получает клиент
+- Чтобы тест работал быстрее
+- Чтобы не нужен был assert
+- Чтобы обойти валидацию
+* Правильный ответ: Чтобы зафиксировать контракт: какой именно текст и структуру получает клиент
+Случайная правка сообщения об ошибке — тоже регрессия: клиенты и тесты могут от него зависеть.
 <!--/QUIZ-->

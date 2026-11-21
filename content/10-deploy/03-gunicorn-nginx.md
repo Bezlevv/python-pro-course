@@ -79,6 +79,17 @@ sudo systemctl reload nginx
 
 Порядок запроса: **Клиент → Nginx (порт 80, статика, SSL) → Gunicorn (127.0.0.1:8000) → приложение**. Gunicorn слушает только на `127.0.0.1` — наружу его порт не торчит, всё внешние запросы идут через Nginx. В приложении не забудь учитывать заголовок `X-Forwarded-Proto`, если генерируешь абсолютные ссылки по протоколу.
 
+Полный путь запроса в такой связке выглядит так:
+
+```mermaid
+flowchart LR
+    A["Клиент"] --> B["Nginx :80"]
+    B -->|"location /static/"| C["Файлы на диске"]
+    B -->|"proxy_pass"| D["Gunicorn 127.0.0.1:8000"]
+    D --> E["Воркеры"]
+    E --> F["Приложение"]
+```
+
 ## Итог урока
 
 Мы выяснили, почему встроенный сервер не годится для продакшена, запустили приложение на Gunicorn с несколькими воркерами и спрятали его за Nginx, который отдаёт статику и проксирует динамику.
@@ -103,6 +114,11 @@ sudo systemctl reload nginx
 
 ### Задача 5
 Подними второй экземпляр Gunicorn: `gunicorn -w 2 -b 127.0.0.1:8001 app:app`. В конфиге Nginx замени прямой `proxy_pass` на блок `upstream backend` с двумя серверами (`127.0.0.1:8000` и `127.0.0.1:8001`) и используй `proxy_pass http://backend;`. Для проверки распределения добавь в `app.py` маршрут `/instance`, возвращающий `os.getpid()`. Выполни `sudo nginx -t`, перезагрузи Nginx и несколько раз выполни `curl http://localhost/instance`. Ожидаемый результат: `curl` продолжает работать, а PID в ответах чередуются — запросы распределяются между обоими экземплярами Gunicorn.
+### Задача 6
+Оформи запуск Gunicorn как systemd-сервис, чтобы приложение поднималось само после перезагрузки сервера. Создай файл `/etc/systemd/system/myapp.service`: в секции `[Unit]` укажи `Description=Gunicorn для Flask-приложения` и `After=network.target`; в `[Service]` — `User=user`, `WorkingDirectory=/home/user/myapp`, `ExecStart=/usr/bin/gunicorn -w 4 -b 127.0.0.1:8000 app:app`, `Restart=always`; в `[Install]` — `WantedBy=multi-user.target`. Выполни `sudo systemctl daemon-reload`, `sudo systemctl enable --now myapp`, затем `systemctl status myapp --no-pager`. Ожидаемый результат: в статусе строка `Active: active (running)`, а `journalctl -u myapp -n 5` показывает строки `Booting worker with pid`. После `sudo reboot` приложение доступно без ручного запуска.
+
+### Задача 7
+Включи HTTPS для того же сайта через Let's Encrypt. Установи пакеты `sudo apt install certbot python3-certbot-nginx`, затем выполни `sudo certbot --nginx -d example.com --redirect` (почту и согласие можно указать в интерактивном режиме). Certbot сам допишет конфиг Nginx и добавит переадресацию с HTTP. Проверь результат: `curl -I http://example.com` и `curl -I https://example.com`. Ожидаемый результат: первая команда отдаёт `301 Moved Permanently` с заголовком `Location: https://example.com/`, вторая — `HTTP/2 200`, а в `/etc/letsencrypt/live/example.com/` лежат `fullchain.pem` и `privkey.pem`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -120,6 +136,11 @@ Gunicorn запускается в фоне или под systemd, но для �
 
 ### Подсказка 5
 Блок `upstream` размещается вне блока `server`, а `proxy_pass` ссылается на его имя: `http://backend`. Nginx по умолчанию распределяет запросы по кругу (round-robin). Каждый экземпляр Gunicorn слушает свой порт, и у каждого воркера свой PID — поэтому несколько `curl http://localhost/instance` подряд должны показывать разные числа.
+### Подсказка 6
+Unit-файл состоит из трёх секций: `[Unit]`, `[Service]`, `[Install]`. В `ExecStart` указывай полный путь к gunicorn и обязательно рабочую папку — иначе он не найдёт `app:app`. После правки unit-файла `daemon-reload` обязателен, иначе systemd будет работать со старой версией. `enable --now` одновременно включает автозапуск и стартует сервис.
+
+### Подсказка 7
+Certbot должен найти блок `server` с правильным `server_name`, иначе он откажется настраивать сайт. Флаг `--redirect` добавляет отдельный сервер с `return 301 https://$host$request_uri`. Проверять редирект нужно без `-L`, иначе `curl` сразу перейдёт на HTTPS и ты не увидишь код 301.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -287,6 +308,74 @@ for i in 1 2 3 4; do curl http://localhost/instance; echo; done
 Ожидаемый результат: `sudo nginx -t` сообщает `syntax is ok`; серия `curl` возвращает чередующиеся PID.
 
 Что здесь происходит? Блок `upstream backend` описывает группу серверов-бэкендов. Nginx по умолчанию использует алгоритм round-robin: каждый новый запрос уходит к следующему серверу по кругу, поэтому PID в ответах чередуются. Это балансировка нагрузки: запросы распределяются между двумя экземплярами Gunicorn, и каждый обрабатывает примерно половину трафика. Обрати внимание: так как приложение теперь живёт в нескольких процессах, хранить состояние в памяти нельзя — сессии и данные должны лежать во внешнем хранилище (база данных, Redis).
+### Разбор 6
+Unit-файл `/etc/systemd/system/myapp.service`:
+
+```ini
+[Unit]
+Description=Gunicorn для Flask-приложения
+After=network.target
+
+[Service]
+User=user
+Group=www-data
+WorkingDirectory=/home/user/myapp
+ExecStart=/usr/bin/gunicorn -w 4 -b 127.0.0.1:8000 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Команды:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now myapp
+systemctl status myapp --no-pager
+journalctl -u myapp -n 5 --no-pager
+```
+
+Ожидаемый результат:
+
+```text
+● myapp.service - Gunicorn для Flask-приложения
+     Loaded: loaded (/etc/systemd/system/myapp.service; enabled)
+     Active: active (running)
+```
+
+а в журнале видны строки `Booting worker with pid: ...` — их печатает каждый воркер при старте.
+
+Что здесь происходит? systemd — это менеджер служб Linux: он запускает процессы при загрузке, следит за ними и перезапускает при падении. `After=network.target` говорит, что сервис нужно поднимать после настройки сети. `WorkingDirectory` задаёт папку, из которой Gunicorn импортирует модуль `app`, — без неё он не найдёт приложение. `Restart=always` перезапускает процесс через `RestartSec` секунд, если тот упал, поэтому приложение переживает ошибки. `systemctl enable` создаёт символическую ссылку в каталоге автозапуска, а `--now` сразу стартует сервис. `daemon-reload` заставляет systemd перечитать unit-файлы: без него изменения просто не применятся. Логи идут в journald, поэтому смотреть их нужно через `journalctl -u myapp`, а не в файле рядом с приложением.
+
+### Разбор 7
+Команды:
+
+```bash
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d example.com --redirect
+```
+
+Проверка:
+
+```bash
+curl -I http://example.com
+curl -I https://example.com
+sudo ls /etc/letsencrypt/live/example.com/
+```
+
+Ожидаемый результат:
+
+```text
+HTTP/1.1 301 Moved Permanently
+Location: https://example.com/
+
+HTTP/2 200
+```
+
+Что здесь происходит? Certbot — клиент Let's Encrypt: он проходит проверку владения доменом (HTTP-01), получает бесплатный сертификат на 90 дней и сам правит конфиг Nginx. Плагин `nginx` находит блок `server` с указанным `server_name`, добавляет `listen 443 ssl`, прописывает пути к `fullchain.pem` и `privkey.pem` и, благодаря флагу `--redirect`, создаёт отдельный сервер на порту 80 с `return 301 https://$host$request_uri`. Теперь любой HTTP-запрос уходит на HTTPS, а браузер видит валидный сертификат. Certbot также ставит таймер `certbot.timer`, который продлевает сертификат автоматически. Важно: порт 443 должен быть открыт в брандмауэре и облачной панели, иначе проверка Let's Encrypt не пройдёт.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -344,4 +433,31 @@ listen задаёт адрес и порт сервера: 80 — стандар
 - Инструмент для нагрузки кода на GitHub
 * Правильный ответ: Посредник между клиентами и серверами приложений: принимает запросы и распределяет их
 Nginx выступает точкой входа: он принимает запросы пользователей, отдаёт статику и передаёт динамические запросы Gunicorn через proxy_pass.
+Что делает директива Restart=always в unit-файле systemd?
+- Перезапускает процесс, если он завершился с ошибкой или был убит
+- Перезагружает сервер при изменении кода
+- Перечитывает конфигурацию Nginx
+* Правильный ответ: Перезапускает процесс, если он завершился с ошибкой или был убит
+Без неё упавший Gunicorn остался бы лежать, и сайт перестал бы отвечать до ручного вмешательства.
+
+Что делает команда systemctl enable myapp?
+- Включает автозапуск сервиса при загрузке системы
+- Запускает сервис прямо сейчас
+- Проверяет синтаксис unit-файла
+* Правильный ответ: Включает автозапуск сервиса при загрузке системы
+Сам запуск выполняет start (или флаг --now), а enable лишь создаёт ссылку для автозапуска.
+
+Где смотреть логи сервиса, запущенного через systemd?
+- В journalctl -u myapp
+- В /var/log/nginx/error.log
+- В stdout текущего терминала
+* Правильный ответ: В journalctl -u myapp
+systemd собирает вывод сервиса в journald, и обращаться к нему нужно по имени unit-файла.
+
+Зачем нужна команда systemctl daemon-reload после правки unit-файла?
+- Чтобы systemd перечитал изменённые файлы служб
+- Чтобы перезапустить все сервисы на сервере
+- Чтобы удалить старые логи
+* Правильный ответ: Чтобы systemd перечитал изменённые файлы служб
+Без перечитывания systemd продолжает использовать старые параметры службы.
 <!--/QUIZ-->

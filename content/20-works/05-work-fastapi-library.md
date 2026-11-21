@@ -43,6 +43,18 @@ tags: fastapi, pydantic, rest api, crud, uvicorn, тестирование
 
 FastAPI и Pydantic, декораторы маршрутов, query-параметры, обработку ошибок через `HTTPException`, паттерн «хранилище отдельно от маршрутов», автоматическую документацию Swagger UI, тесты через `TestClient`.
 
+Путь запроса через слои приложения:
+
+```mermaid
+flowchart LR
+    A["HTTP-запрос"] --> B["Маршрут main.py"]
+    B --> C["Валидация Pydantic"]
+    C --> D["storage.py"]
+    D --> E{"Проверки пройдены?"}
+    E -- "нет" --> F["HTTPException 404 или 409"]
+    E -- "да" --> G["JSON-ответ 200 или 201"]
+```
+
 ## План работы
 
 Работа разбита на 5 этапов. Проходи их по порядку: каждый следующий опирается на предыдущий. Не переходи к новому этапу, пока не проверены, что предыдущие сценарии работают в `/docs`.
@@ -62,6 +74,12 @@ FastAPI и Pydantic, декораторы маршрутов, query-параме
 
 ### Задача 5
 Добавь эндпоинт `GET /stats`, возвращающий `{"total_books": ..., "available_books": ..., "active_borrows": ..., "total_readers": ..., "top_books": [{"title": ..., "borrow_count": ...}]}` — топ-5 книг по числу выдач. Запрети удаление книги, у которой есть активные выдачи (код 409). Напиши тесты в файле `test_app.py` через `TestClient`: минимум 4 сценария (создание книги; дубль ISBN — 409; выдача книги и затем возврат; статистика). Ожидаемый результат: `pytest test_app.py` проходит полностью, статистика корректно отражает состояние «библиотеки».
+### Задача 6
+Добавь продление и контроль сроков. Расширь запись о выдаче полями `due_date` (плановая дата возврата, `borrow_date + 14 дней`) и `renewals` (по умолчанию 0). Эндпоинт `POST /borrows/{borrow_id}/renew` разрешён, только если книга ещё не возвращена и продлений было меньше двух: `due_date` сдвигается на 14 дней через `timedelta`, `renewals` растёт на 1, иначе — 409 с понятным `detail`. Эндпоинт `GET /borrows/overdue` возвращает активные выдачи с `due_date` в прошлом и полями `borrow_id`, `book_id`, `reader_id`, `days_overdue`. Ожидаемый вывод: `{"borrow_id": 1, "days_overdue": 3}`; третье продление даёт 409.
+
+### Задача 7
+Сделай частичное обновление. Опиши модель `BookUpdate` с необязательными полями (`title`, `author`, `year`, `genre`, `isbn`, `copies` — все `| None = None`) и эндпоинт `PATCH /books/{book_id}`: он меняет только переданные поля через `model_dump(exclude_unset=True)`, проверяет, что новый ISBN не занят другой книгой (409), отвечает 404 на неизвестный id и возвращает обновлённую книгу. `PUT` оставь полной заменой. Ожидаемый результат: `PATCH /books/1` с телом `{"copies": 5}` меняет только `copies`, а `year` остаётся прежним; смена ISBN на занятый даёт 409.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -79,6 +97,12 @@ Pydantic импортируется так: `from pydantic import BaseModel, Fie
 
 ### Подсказка 5
 Для топа книг посчитай частоту `book_id` в `borrows_db` с `return_date` или без — не важно, сверять можно все выдачи: `Counter(b["book_id"] for b in borrows_db)` из `collections`. Проверку запрета удаления делай в `delete_book`: если `any(b["book_id"] == book_id and b["return_date"] is None for b in borrows_db)` — 409. Тесты: `from fastapi.testclient import TestClient`, затем `client = TestClient(app)` — объект `client` работает как `requests`: `client.post("/books", json={...})`, `client.get("/books")`. Проверяй `response.status_code` и `response.json()`. `TestClient` запускает приложение в памяти, поднимать uvicorn для тестов не нужно.
+### Подсказка 6
+При создании записи считай план: `due_date = date.today() + timedelta(days=14)`. Для продления найди запись, проверь `return_date is None` и `renewals < 2`, затем `borrow["due_date"] = str(date.fromisoformat(borrow["due_date"]) + timedelta(days=14))` — дата в словаре хранится строкой. Просрочка: `(date.today() - date.fromisoformat(b["due_date"])).days`, оставляй только положительные значения и незакрытые выдачи.
+
+### Подсказка 7
+`BookUpdate` наследуй от `BaseModel` и оставь все поля `str | None = None`; ограничения `Field` можно сохранить. В маршруте `data = payload.model_dump(exclude_unset=True)` — в словаре окажутся только те ключи, которые клиент реально прислал. Проверку ISBN делай до `update`: `any(b["isbn"] == data["isbn"] and b["id"] != book_id for b in books_db)`. Пустое тело — валидный запрос, который ничего не меняет.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -398,6 +422,117 @@ def test_stats():
 ```
 
 `TestClient` из `fastapi.testclient` запускает приложение в памяти — сервер поднимать не нужно. Внимание: тесты используют общее глобальное хранилище, поэтому они должны идти в порядке, который не ломается (мы создаём книги в первых тестах и опираемся на них в `test_stats`). Запуск: `pytest test_app.py` из папки `library`. `Counter` из `collections` удобно считает частоты; `most_common(5)` сразу даёт топ-5. Статистика считается на лету — это нормально для in-memory хранилища. Проверь запрет удаления: `DELETE /books/1` при активной выдаче вернёт 409.
+### Разбор 6
+Плановую дату храним в записи, а не вычисляем на лету: продление меняет именно её, и без отдельного поля историю обещаний не восстановить.
+
+```python
+from datetime import date, timedelta
+
+
+def borrow_book(book_id: int, reader_id: int):
+    global next_borrow_id
+    book = book_by_id(book_id)
+    if not any(r["id"] == reader_id for r in readers_db):
+        raise HTTPException(status_code=404, detail="Читатель не найден")
+    if book["copies"] <= 0:
+        raise HTTPException(status_code=409, detail="Нет доступных экземпляров")
+    book["copies"] -= 1
+    today = date.today()
+    record = {
+        "id": next_borrow_id,
+        "book_id": book_id,
+        "reader_id": reader_id,
+        "borrow_date": str(today),
+        "due_date": str(today + timedelta(days=14)),
+        "return_date": None,
+        "renewals": 0,
+    }
+    next_borrow_id += 1
+    borrows_db.append(record)
+    return record
+
+
+def borrow_by_id(borrow_id: int):
+    for borrow in borrows_db:
+        if borrow["id"] == borrow_id:
+            return borrow
+    raise HTTPException(status_code=404, detail="Выдача не найдена")
+
+
+def renew_borrow(borrow_id: int):
+    borrow = borrow_by_id(borrow_id)
+    if borrow["return_date"] is not None:
+        raise HTTPException(status_code=409, detail="Выдача уже закрыта")
+    if borrow["renewals"] >= 2:
+        raise HTTPException(status_code=409, detail="Лимит продлений исчерпан")
+    due = date.fromisoformat(borrow["due_date"]) + timedelta(days=14)
+    borrow["due_date"] = str(due)
+    borrow["renewals"] += 1
+    return borrow
+
+
+def overdue_borrows():
+    today = date.today()
+    result = []
+    for borrow in borrows_db:
+        if borrow["return_date"] is not None:
+            continue
+        due = date.fromisoformat(borrow["due_date"])
+        if due < today:
+            result.append({
+                "borrow_id": borrow["id"],
+                "book_id": borrow["book_id"],
+                "reader_id": borrow["reader_id"],
+                "days_overdue": (today - due).days,
+            })
+    return result
+```
+
+```python
+@app.post("/borrows/{borrow_id}/renew")
+def renew(borrow_id: int):
+    return storage.renew_borrow(borrow_id)
+
+
+@app.get("/borrows/overdue")
+def overdue():
+    return storage.overdue_borrows()
+```
+
+`due_date` — отдельное поле, потому что `return_date` означает факт возврата и до него остаётся `None`. `timedelta(days=14)` прибавляется к `date`, а не к строке: сначала `date.fromisoformat`, потом обратное `str(...)` — иначе получим конкатенацию строк. Порядок проверок в `renew_borrow` важен: закрытая выдача и исчерпанный лимит — оба 409, но с разными `detail`, чтобы клиент понимал причину. `overdue_borrows` фильтрует незакрытые записи и считает разницу в днях; она положительна только для просроченных. Маршрут `/borrows/overdue` объявляй до любых `/borrows/{borrow_id}` с тем же методом, иначе FastAPI попытается разобрать слово `overdue` как `int`.
+
+### Разбор 7
+Разделяем «создать» и «изменить»: полная модель требует все поля, частичная — только те, что пришли.
+
+```python
+class BookUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    author: str | None = Field(default=None, min_length=1, max_length=100)
+    year: int | None = Field(default=None, ge=1455, le=date.today().year)
+    genre: str | None = Field(default=None, min_length=1, max_length=50)
+    isbn: str | None = Field(default=None, min_length=10, max_length=17)
+    copies: int | None = Field(default=None, ge=0)
+```
+
+```python
+def patch_book(book_id: int, data: dict):
+    book = book_by_id(book_id)
+    new_isbn = data.get("isbn")
+    if new_isbn and any(b["isbn"] == new_isbn and b["id"] != book_id
+                        for b in books_db):
+        raise HTTPException(status_code=409, detail="Книга с таким ISBN уже существует")
+    book.update(data)
+    return book
+```
+
+```python
+@app.patch("/books/{book_id}")
+def patch_book(book_id: int, payload: BookUpdate):
+    return storage.patch_book(book_id, payload.model_dump(exclude_unset=True))
+```
+
+`exclude_unset=True` — ключевая деталь: без него `model_dump()` вернул бы все поля, и неуказанные превратились бы в `None`, затерев данные книги. С ним в словаре остаются только присланные ключи, а `book.update(data)` меняет ровно их. Проверка ISBN исключает саму книгу (`b["id"] != book_id`), иначе сохранение того же ISBN считалось бы конфликтом. `copies` в `BookUpdate` допускает 0, потому что все экземпляры могут быть выданы, а при создании книги требуется минимум один. `PUT` остаётся полной заменой и по-прежнему требует все поля — так клиент явно выбирает между «переписать» и «поправить».
+
 <!--/SOLUTION-->
 
 ## Критерии оценки
@@ -494,4 +629,35 @@ FastAPI перехватывает `HTTPException` и превращает её 
 - Перезапускает сервер после каждого запроса
 * Правильный ответ: Создаёт HTTP-клиент для тестирования приложения в памяти
 `TestClient` вызывает приложение напрямую, без реального сервера — поэтому тесты быстрые и не требуют портов.
+Чем `PATCH` отличается от `PUT` в этом API?
+- `PATCH` меняет только переданные поля, `PUT` заменяет ресурс целиком
+- `PATCH` работает только с книгами
+- `PUT` возвращает 204, а `PATCH` — 201
+- Между ними нет разницы
+* Правильный ответ: `PATCH` меняет только переданные поля, `PUT` заменяет ресурс целиком
+Частичное обновление удобно, когда нужно поменять одно поле, не пересылая всю книгу.
+
+Что делает `model_dump(exclude_unset=True)`?
+- Возвращает только те поля, которые клиент явно передал
+- Удаляет все поля со значением `None` из модели
+- Проверяет уникальность полей
+- Превращает модель в JSON-строку
+* Правильный ответ: Возвращает только те поля, которые клиент явно передал
+Именно это защищает остальные поля книги от затирания значениями по умолчанию.
+
+Как получить плановую дату возврата через 14 дней?
+- `date.today() + timedelta(days=14)`
+- `date.today() + 14`
+- `timedelta(days=14)`
+- `date.today().replace(day=14)`
+* Правильный ответ: `date.today() + timedelta(days=14)`
+С датой складывается именно `timedelta`; число дней само по себе даст `TypeError`.
+
+Что вернёт `(date(2026, 11, 21) - date(2026, 11, 1)).days`?
+- 20
+- 21
+- 19
+- 22
+* Правильный ответ: 20
+Разница между 1 и 21 ноября — ровно 20 суток.
 <!--/QUIZ-->

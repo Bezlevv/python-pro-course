@@ -29,6 +29,27 @@ feature:  A -> D -> B' -> C'
 
 В чём преимущество перед merge? История без «мусорных» merge-коммитов, и каждый коммит в `feature` выглядит так, будто он сделан сразу поверх актуального `main`. Это упрощает ревью: коллега видит только твои реальные изменения.
 
+## Что происходит с историей
+
+Полезно один раз увидеть две картинки рядом: до rebase ветка `feature` ответвляется от старого `A`, после — её коммиты лежат поверх свежего `D`. Старые `B` и `C` остаются в reflog, но в истории ветки их заменяют `B'` и `C'`.
+
+```mermaid
+flowchart TD
+    subgraph before["До rebase"]
+        A1["A"] --> B1["B"]
+        B1 --> C1["C"]
+        A1 --> D1["D в main"]
+    end
+    subgraph after["После rebase"]
+        A2["A"] --> D2["D"]
+        D2 --> B2["B'"]
+        B2 --> C2["C'"]
+    end
+    C1 -.->|"те же изменения"| C2
+```
+
+Именно смена родителя меняет хэш: содержимое `B'` и `B` может совпадать, но `parent` другой, а значит, и SHA другой.
+
 ## Практика: базовый rebase
 
 ```bash
@@ -156,6 +177,11 @@ git cherry-pick <sha_бага1>..<sha_бага2>
 ```
 
 (где `<sha_бага1>` и `<sha_бага2>` — хэши коммитов из вывода лога). Проверь `git log --oneline`. Ожидаемый результат: в `hotfix` появились два новых коммита с теми же сообщениями, что и баги, и их количество равно числу коммитов в диапазоне.
+### Задача 6
+Освой `git rebase --onto`, когда нужно перенести не всю ветку, а только её хвост. Во временном репозитории создай на `main` коммит `A` (`base.py`), затем ветку `feature` с коммитами `B` (`b.py`), `C` (`c.py`) и `D` (`d.py`). Вернись на `main` и добавь коммит `E` (`main.py`). Запомни хэш `B` и выполни `git rebase --onto main <sha_B> feature`. Проверь через `git log --format=%s feature`, что в ветке остались `D`, `C`, `E`, `A`, а коммита `B` нет. Ожидаемый вывод: четыре сообщения в обратном хронологическом порядке и отсутствие `B`.
+
+### Задача 7
+Разбери два флага cherry-pick. В репозитории с ветками `main` и `release` сделай на `main` коммит `fix: округление` и перенеси его в `release` командой `git cherry-pick -x <sha>`. Проверь, что `git log -1 --format=%B` содержит строку `(cherry picked from commit <sha>)`. Затем сделай второй фикс на `main`, примени его через `git cherry-pick -n <sha>`, убедись, что `HEAD` не изменился, а `git status --porcelain` показывает изменённый файл, и только потом закоммить оба изменения одним коммитом `release: фиксы округления`. Ожидаемый вывод: в `release` два коммита, первый содержит ссылку на оригинал.
 <!--/TASK-->
 
 <!--HINT-->
@@ -173,6 +199,11 @@ git cherry-pick <sha_бага1>..<sha_бага2>
 
 ### Подсказка 5
 Диапазон `A..B` включает коммиты после `A` вплоть до `B`. Если в `hotfix` оказалось больше коммитов, чем ожидалось, проверь, что `A` — ровно тот коммит, после которого должны идти переносимые. Отменить ошибочный cherry-pick можно `git cherry-pick --abort`.
+### Подсказка 6
+Синтаксис: `git rebase --onto <новая_база> <коммит_после_которого> <ветка>` — переносятся коммиты, которые есть в `<ветка>`, но нет в `<коммит_после_которого>`, то есть сам `B` не переносится. Хэш `B` получи через `git rev-parse feature~2` или `git log --format=%H --grep="^B$"`. Если перепутать аргументы, Git может сказать `fatal: invalid upstream`, поэтому проверяй порядок: сначала `main`, потом `B`, потом `feature`.
+
+### Подсказка 7
+`-x` дописывает в сообщение строку `(cherry picked from commit ...)` — это удобно для аудита релизной ветки. `-n` (`--no-commit`) применяет изменения в индекс и рабочее дерево, но не создаёт коммит: `HEAD` остаётся прежним, а `git status` покажет staged-файлы. После `-n` можно добавить ещё изменения и сделать один общий коммит.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -363,6 +394,92 @@ git log --oneline
 ```
 
 Диапазон `A..B` в cherry-pick означает: «применить все коммиты, которые есть после `A` и вплоть до `B`». Важная деталь: `A` не включается, `B` включается. Если нужно включить и `A`, можно передать его родителя: `A~1..B`. Количество применённых коммитов равно `git rev-list --count A..B`. Итог: в `hotfix` появится столько же новых коммитов, сколько было в диапазоне, с теми же сообщениями, но новыми хэшами. Это стандартный сценарий backport: берём несколько исправлений с `main` и переносим их в релизную ветку, не дожидаясь всей остальной разработки.
+### Разбор 6
+Решение (`test_rebase_onto.py`):
+
+```python
+import subprocess
+
+def git(*args, cwd):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+def commit(repo, filename, message):
+    (repo / filename).write_text(message, encoding="utf-8")
+    git("add", filename, cwd=repo)
+    git("commit", "-m", message, cwd=repo)
+
+def test_rebase_onto_moves_only_tail(tmp_path):
+    repo = tmp_path
+    git("init", cwd=repo)
+    git("config", "user.name", "Test", cwd=repo)
+    git("config", "user.email", "test@example.com", cwd=repo)
+
+    commit(repo, "base.py", "A")
+    git("checkout", "-b", "feature", cwd=repo)
+    commit(repo, "b.py", "B")
+    commit(repo, "c.py", "C")
+    commit(repo, "d.py", "D")
+    sha_b = git("rev-parse", "HEAD~2", cwd=repo)
+
+    git("checkout", "main", cwd=repo)
+    commit(repo, "main.py", "E")
+
+    git("rebase", "--onto", "main", sha_b, "feature", cwd=repo)
+    messages = git("log", "--format=%s", "feature", cwd=repo).splitlines()
+    assert messages == ["D", "C", "E", "A"]
+```
+
+Что здесь происходит? Обычный `git rebase main` перенёс бы **все** коммиты, которых нет в `main`, включая `B`. Но `B` может быть, например, экспериментальным коммитом, который не нужен в релизе. `--onto` отделяет «базу» от «того, что переносим»: Git берёт коммиты из диапазона `B..feature` (то есть `C` и `D`) и применяет их поверх `main`. Проверка `messages == ["D", "C", "E", "A"]` фиксирует и порядок, и отсутствие `B`. Такой приём часто используют, когда ветку ответвили не от той базовой ветки и нужно «перевесить» её хвост на другую.
+
+### Разбор 7
+Решение (`test_cherry_flags.py`):
+
+```python
+import subprocess
+
+def git(*args, cwd):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+def make_repo(tmp_path):
+    git("init", cwd=tmp_path)
+    git("config", "user.name", "Test", cwd=tmp_path)
+    git("config", "user.email", "test@example.com", cwd=tmp_path)
+    (tmp_path / "calc.py").write_text("def round_price(x):\n    return x\n", encoding="utf-8")
+    git("add", ".", cwd=tmp_path)
+    git("commit", "-m", "init", cwd=tmp_path)
+    git("checkout", "-b", "release", cwd=tmp_path)
+    git("checkout", "main", cwd=tmp_path)
+
+def test_cherry_pick_x_records_origin(tmp_path):
+    make_repo(tmp_path)
+    (tmp_path / "calc.py").write_text("def round_price(x):\n    return round(x, 2)\n", encoding="utf-8")
+    git("commit", "-am", "fix: округление", cwd=tmp_path)
+    sha = git("rev-parse", "HEAD", cwd=tmp_path)
+
+    git("checkout", "release", cwd=tmp_path)
+    git("cherry-pick", "-x", sha, cwd=tmp_path)
+    message = git("log", "-1", "--format=%B", cwd=tmp_path)
+    assert f"(cherry picked from commit {sha})" in message
+
+def test_cherry_pick_no_commit_keeps_head(tmp_path):
+    make_repo(tmp_path)
+    (tmp_path / "calc.py").write_text("def round_price(x):\n    return round(x, 2)\n", encoding="utf-8")
+    git("commit", "-am", "fix: округление", cwd=tmp_path)
+    sha = git("rev-parse", "HEAD", cwd=tmp_path)
+
+    git("checkout", "release", cwd=tmp_path)
+    head_before = git("rev-parse", "HEAD", cwd=tmp_path)
+    git("cherry-pick", "-n", sha, cwd=tmp_path)
+
+    assert git("rev-parse", "HEAD", cwd=tmp_path) == head_before
+    assert "calc.py" in git("status", "--porcelain", cwd=tmp_path)
+```
+
+Что здесь происходит? `-x` не меняет сами изменения, но добавляет в сообщение трассируемую ссылку на оригинальный коммит. Это спасает при разборе релиза: видно, откуда пришёл фикс и не потерялся ли он при следующем мерже. `-n` останавливается на полпути: изменения уже в индексе, но коммит не создан, поэтому `HEAD` не двигается. Так удобно собрать несколько мелких фиксов в один осмысленный коммит релизной ветки. Обрати внимание на `git commit -am` в подготовке: он коммитит только отслеживаемые файлы, поэтому `calc.py` должен уже существовать в `init`. В тестах мы проверяем не только наличие строки, но и неизменность `HEAD` — иначе легко перепутать `-n` с обычным cherry-pick.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -445,4 +562,35 @@ cherry-pick берёт изменения указанного коммита и
 - Для сравнения двух веток
 * Правильный ответ: Для переноса отдельного исправления в релизную ветку
 Когда нужно продублировать один фикс в другой ветке, cherry-pick — самый точечный инструмент.
+Что делает git rebase --onto main B feature?
+- Переносит коммиты после B (не включая B) на main
+- Переносит все коммиты feature, включая B
+- Сливает main и feature в один коммит
+- Удаляет коммит B из истории
+* Правильный ответ: Переносит коммиты после B (не включая B) на main
+Диапазон B..feature не включает сам B, поэтому переносится только хвост ветки.
+
+Что добавляет флаг -x в git cherry-pick?
+- Строку (cherry picked from commit ...) в сообщение коммита
+- Подпись GPG
+- Удаление исходного коммита
+- Сжатие нескольких коммитов в один
+* Правильный ответ: Строку (cherry picked from commit ...) в сообщение коммита
+Это удобно для аудита: видно, откуда пришёл фикс в релизную ветку.
+
+Чем fixup отличается от squash в интерактивном rebase?
+- fixup объединяет коммит с предыдущим, но не открывает редактор сообщения
+- fixup удаляет коммит
+- fixup меняет только автора
+- Ничем, это синонимы
+* Правильный ответ: fixup объединяет коммит с предыдущим, но не открывает редактор сообщения
+fixup сохраняет сообщение предыдущего коммита, squash даёт его отредактировать.
+
+Куда указывает ORIG_HEAD сразу после rebase?
+- На позицию ветки до начала rebase
+- На первый коммит репозитория
+- На удалённую ветку origin/main
+- На stash
+* Правильный ответ: На позицию ветки до начала rebase
+Поэтому git reset --hard ORIG_HEAD — быстрый способ отменить неудачный rebase.
 <!--/QUIZ-->

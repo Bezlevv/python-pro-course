@@ -41,6 +41,20 @@ HR-агентство «Карьера» собирает данные о зар
 
 pandas: `read_csv`, `info`, `isna`, `dropna`, `fillna`, `drop_duplicates`, `groupby`, `agg`, `cut`, `quantile`, `to_csv`. matplotlib: `hist`, `boxplot`, `bar`, `savefig`, `subplots`. Streamlit: `title`, `selectbox`, `multiselect`, `slider`, `checkbox`, `metric`, `pyplot`, `dataframe`.
 
+Путь данных в проекте:
+
+```mermaid
+flowchart LR
+    A["make_data.py"] --> B["salaries.csv"]
+    B --> C["load_and_clean"]
+    C --> D["calculate_stats"]
+    C --> E["Графики PNG"]
+    D --> F["stats_city.csv"]
+    E --> G["app.py Streamlit"]
+    F --> G
+    G --> H["Фильтры и метрики"]
+```
+
 ## План работы
 
 Иди по этапам по порядку — каждый следующий опирается на предыдущий. В конце у тебя получится самостоятельный проект из трёх скриптов: `make_data.py`, `analysis.py`, `app.py`.
@@ -60,6 +74,12 @@ pandas: `read_csv`, `info`, `isna`, `dropna`, `fillna`, `drop_duplicates`, `grou
 
 ### Задача 5
 Создай `app.py` — дашборд на Streamlit. Внутри: `st.title`, загрузка и очистка данных (переиспользуй функции из `analysis.py`), сайдбар с фильтрами: `st.selectbox` для города (с вариантом «Все города»), `st.multiselect` для должностей, `st.slider` для диапазона опыта, `st.checkbox` «Только удалёнка». Основная область: три `st.metric` (средняя зарплата, медианная, количество записей), `st.dataframe` с отфильтрованными данными и три графика (пирог-гистограмма, boxplot, bar chart), пересчитываемые на отфильтрованном датафрейме. Ожидаемый результат: `streamlit run app.py` открывает дашборд в браузере, фильтры меняют цифры метрик и формы графиков.
+### Задача 6
+Построй сводную таблицу «город × должность». Добавь в `analysis.py` функцию `pivot_salary(df)`: `pd.pivot_table` со значениями `salary_rub`, индексом `city`, столбцами `position`, агрегатом `median` и `fill_value=0`; округли до целых и сохрани результат в `pivot_city_position.csv`. Затем нарисуй тепловую карту: `plt.imshow(matrix, cmap="YlOrRd")`, подписи городов по оси Y, должностей по X, значения в ячейках, `plt.colorbar()`, сохранение в `heatmap_city_position.png`. Ожидаемый результат: таблица 5×5, в ячейке «Москва / DevOps» наибольшее число, PNG читается и подписи не обрезаны.
+
+### Задача 7
+Сделай дашборд пригодным для чужих данных. Добавь `@st.cache_data` над функцией загрузки, чтобы очистка не повторялась при каждом движении фильтра; `st.sidebar.file_uploader` для своего CSV (если файл не загружен — берётся `salaries.csv`); `st.download_button`, который отдаёт отфильтрованные строки в CSV (`index=False`, `mime="text/csv"`, имя `filtered.csv`). Ожидаемый результат: фильтры переключаются без заметной паузы, загруженный CSV заменяет данные, а кнопка скачивания отдаёт ровно те строки, что видны в таблице.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -77,6 +97,12 @@ pandas: `read_csv`, `info`, `isna`, `dropna`, `fillna`, `drop_duplicates`, `grou
 
 ### Подсказка 5
 Фильтрацию строй цепочкой условий: `mask = df["city"] == selected_city` (если не «Все города»), `mask &= df["position"].isin(selected_positions)` (если список непуст), `mask &= df["experience_years"].between(exp_min, exp_max)`, `mask &= df["remote"]` (если чекбокс включён), затем `filtered = df[mask]`. Для графиков передавай `filtered` в функции из задачи 4, но вместо `savefig` показывай `st.pyplot(plt.gcf())`. Метрики: `st.metric("Средняя зарплата", f"{filtered['salary_rub'].mean():,.0f} ₽")`.
+
+### Подсказка 6
+`pivot = pd.pivot_table(df, values="salary_rub", index="city", columns="position", aggfunc="median", fill_value=0)`. Для картинки возьми `matrix = pivot.values`, нарисуй `plt.imshow(matrix, cmap="YlOrRd", aspect="auto")`, затем `plt.xticks(range(len(pivot.columns)), pivot.columns, rotation=45, ha="right")` и `plt.yticks(range(len(pivot.index)), pivot.index)`. Числа в ячейках — вложенный цикл с `plt.text(j, i, int(matrix[i, j]), ha="center", va="center")`; цвет текста выбирай по яркости фона.
+
+### Подсказка 7
+Кэш ставится декоратором над функцией, которая возвращает данные: `@st.cache_data` и `def load_data(file): ...`. `st.file_uploader("CSV", type="csv")` вернёт объект файла или `None` — передавай в `pd.read_csv` либо сам объект, либо путь `"salaries.csv"`. Для скачивания: `st.download_button("Скачать CSV", data=filtered.to_csv(index=False).encode("utf-8"), file_name="filtered.csv", mime="text/csv")`. Кодируй строку в байты: так русские буквы не потеряются.
 
 <!--/HINT-->
 
@@ -317,6 +343,99 @@ st.pyplot(fig3)
 ```
 
 Дашборд переиспользует функции из `analysis.py` — так мы не дублируем код очистки. Фильтры строятся цепочкой: начальная маска — все `True`, дальше `&=` добавляет условия. `st.sidebar` группирует управление слева; `st.columns` размещает метрики в ряд; `st.dataframe` показывает сырую отфильтрованную таблицу. Графики рисуются на собственных `subplots` и показываются через `st.pyplot(fig)`. Обрати внимание: маска города сравнивается с `selected_city.lower()` — потому что очистка привела города к нижнему регистру. Запуск: `streamlit run app.py`, браузер откроет http://localhost:8501. Меняй фильтры — метрики и графики пересчитываются мгновенно.
+### Разбор 6
+```python
+import matplotlib.pyplot as plt
+import pandas as pd
+
+
+def pivot_salary(df):
+    pivot = pd.pivot_table(
+        df,
+        values="salary_rub",
+        index="city",
+        columns="position",
+        aggfunc="median",
+        fill_value=0,
+    ).round(0)
+    pivot.to_csv("pivot_city_position.csv")
+
+    matrix = pivot.values
+    plt.figure(figsize=(10, 6))
+    plt.imshow(matrix, cmap="YlOrRd", aspect="auto")
+    plt.colorbar(label="Медианная зарплата, ₽")
+    plt.xticks(range(len(pivot.columns)), pivot.columns,
+               rotation=45, ha="right")
+    plt.yticks(range(len(pivot.index)), pivot.index)
+
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            value = int(matrix[i, j])
+            color = "white" if value > matrix.max() * 0.6 else "black"
+            plt.text(j, i, value, ha="center", va="center", color=color)
+
+    plt.title("Медианная зарплата: город и должность")
+    plt.tight_layout()
+    plt.savefig("heatmap_city_position.png")
+    plt.close()
+    return pivot
+```
+
+`pivot_table` собирает двумерную сводку: строки — города, столбцы — должности, в ячейках — медиана зарплаты. Медиана устойчивее среднего, поэтому одна аномальная запись не «раздувает» клетку. `fill_value=0` закрывает пустые комбинации: если в городе нет такой должности, честнее показать ноль, чем `NaN`, который ломает `imshow`. `matrix = pivot.values` — обычный NumPy-массив, с ним работают `shape` и индексы `[i, j]`. Подписи осей задаются вручную через `xticks`/`yticks`: `imshow` по умолчанию нумерует клетки, а нам нужны названия. `ha="right"` и поворот на 45 градусов спасают длинные названия должностей от наложения. Цвет текста переключается по яркости фона, иначе числа теряются на тёмных клетках.
+
+### Разбор 7
+```python
+import pandas as pd
+import streamlit as st
+
+from analysis import load_and_clean
+
+
+@st.cache_data
+def load_data(file):
+    return load_and_clean(file)
+
+
+st.title("💼 Анализ зарплат IT-специалистов")
+
+uploaded = st.sidebar.file_uploader("Свой CSV", type="csv")
+source = uploaded if uploaded is not None else "salaries.csv"
+df = load_data(source)
+
+cities = ["Все города"] + sorted(df["city"].unique().tolist())
+selected_city = st.sidebar.selectbox("Город", cities)
+positions = sorted(df["position"].unique().tolist())
+selected_positions = st.sidebar.multiselect("Должности", positions, default=positions)
+exp_min, exp_max = st.sidebar.slider("Опыт, лет", 0, 25, (0, 25))
+only_remote = st.sidebar.checkbox("Только удалёнка")
+
+mask = pd.Series(True, index=df.index)
+if selected_city != "Все города":
+    mask &= df["city"] == selected_city.lower()
+if selected_positions:
+    mask &= df["position"].isin(selected_positions)
+mask &= df["experience_years"].between(exp_min, exp_max)
+if only_remote:
+    mask &= df["remote"]
+
+filtered = df[mask]
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Средняя зарплата", f"{filtered['salary_rub'].mean():,.0f} ₽")
+col2.metric("Медианная зарплата", f"{filtered['salary_rub'].median():,.0f} ₽")
+col3.metric("Записей", len(filtered))
+
+st.dataframe(filtered)
+st.download_button(
+    "Скачать отфильтрованные данные",
+    data=filtered.to_csv(index=False).encode("utf-8"),
+    file_name="filtered.csv",
+    mime="text/csv",
+)
+```
+
+`@st.cache_data` запоминает результат функции по её аргументам: пока файл тот же, очистка не выполняется заново, и переключение фильтров не ждёт пересчёта. Декоратор работает только с хэшируемыми аргументами, поэтому в функцию передаём путь или сам загруженный файл — Streamlit умеет хэшировать и его содержимое. `file_uploader` возвращает `None`, пока пользователь ничего не выбрал, — отсюда ветка с `salaries.csv` по умолчанию. `download_button` принимает уже готовые байты: `to_csv(index=False)` убирает служебный столбец индекса, а `.encode("utf-8")` превращает строку в данные, которые браузер сохранит файлом. `mime="text/csv"` подсказывает браузеру тип файла. В итоге пользователь скачивает ровно то, что видит в таблице после фильтров.
+
 <!--/SOLUTION-->
 
 ## Критерии оценки
@@ -411,4 +530,35 @@ st.pyplot(fig3)
 - Откроется новое окно
 * Правильный ответ: Ничего страшного: `st.pyplot` показывает текущую фигуру matplotlib
 `st.pyplot` отображает активную фигуру; в дашборде мы рисуем `subplots` и передаём фигуру в `st.pyplot(fig)`.
+Что строит `pd.pivot_table(df, values="salary_rub", index="city", columns="position", aggfunc="median")`?
+- Таблицу, где строки — города, столбцы — должности, а в ячейках медианные зарплаты
+- Список всех зарплат по убыванию
+- Гистограмму распределения
+- Только средние по городам
+* Правильный ответ: Таблицу, где строки — города, столбцы — должности, а в ячейках медианные зарплаты
+`index` задаёт строки, `columns` — столбцы, `values` и `aggfunc` — что считать в ячейках.
+
+Зачем в `pivot_table` указывают `fill_value=0`?
+- Чтобы пустые комбинации город-должность стали нулями, а не `NaN`
+- Чтобы ускорить агрегацию
+- Чтобы отсортировать столбцы
+- Чтобы округлить зарплаты
+* Правильный ответ: Чтобы пустые комбинации город-должность стали нулями, а не `NaN`
+`NaN` в матрице ломает тепловую карту и портит арифметику.
+
+Что даёт декоратор `@st.cache_data`?
+- Кэширует результат функции, чтобы не пересчитывать его при каждом взаимодействии
+- Очищает данные от пропусков
+- Сохраняет файл на диск
+- Ускоряет браузер
+* Правильный ответ: Кэширует результат функции, чтобы не пересчитывать его при каждом взаимодействии
+Пока аргументы не изменились, Streamlit берёт готовый результат из кэша.
+
+Что вернёт `st.file_uploader`, если пользователь не выбрал файл?
+- `None`
+- Пустую строку
+- Пустой DataFrame
+- Ошибку
+* Правильный ответ: `None`
+Поэтому нужна ветка с файлом по умолчанию: `source = uploaded if uploaded is not None else "salaries.csv"`.
 <!--/QUIZ-->

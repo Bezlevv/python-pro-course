@@ -26,6 +26,19 @@ tags: python, requests, BeautifulSoup, парсинг, цены, smtplib, уве
 - Вежливость: пауза минимум 1 секунда между запросами, пауза `interval` между циклами проверки.
 - Обработка ошибок сети: `requests.exceptions.RequestException` не должна ронять программу — после ошибки она ждёт следующий цикл.
 
+Путь одной проверки:
+
+```mermaid
+flowchart LR
+    A["Скрейпер"] --> B["GET каталога"]
+    B --> C["parse_books"]
+    C --> D{"Цена не выше порога?"}
+    D -- "да" --> E["Отчёт в консоль"]
+    D -- "нет" --> H["Пропустить"]
+    E --> F["alerts.log"]
+    E --> G["Письмо SMTP"]
+```
+
 ## Как работать с заданием
 
 Работай по этапам в одном файле `price_scraper.py`. После каждого этапа запускай программу и проверяй результат. Перед сдачей проверь: запуск с настоящим сайтом, запись в `alerts.log`, корректное завершение по `Ctrl+C`. Не забудь про `config.json` — программа должна работать и без почтовых настроек.
@@ -71,6 +84,14 @@ tags: python, requests, BeautifulSoup, парсинг, цены, smtplib, уве
 ### Задача 5
 
 Собери всё в цикл мониторинга. Считай `config.json` (с дефолтами, если файла нет: `threshold=50`, `interval=60`). Цикл `while True`: получай страницу, парси, сравнивай, уведомляй, затем `time.sleep(interval)`. Обработай `KeyboardInterrupt` — при `Ctrl+C` выведи сообщение и завершись аккуратно. Между запросами внутри цикла держи паузу минимум 1 секунду. Проверь: запусти на `interval=10`, дождись 2–3 циклов, заверши через `Ctrl+C`.
+### Задача 6
+
+Собери весь каталог, а не первую страницу. Напиши `crawl_catalog(session, pages=3)`: начни с `https://books.toscrape.com/`, распарси книги, затем найди ссылку следующей страницы `li.next a` и склей адрес через `urllib.parse.urljoin`. Повтори для `pages` страниц, держа паузу `time.sleep(1)` между запросами, и убери дубликаты по названию через множество. Ожидаемый вывод: `Страница 1: 20 книг, всего 20`, `Страница 2: 20 книг, всего 40`, `Страница 3: 20 книг, всего 60`.
+
+### Задача 7
+
+Веди историю цен. Функция `save_snapshot(books, path="history.csv")` дописывает строки `timestamp,title,price`, а заголовок пишет только при создании файла. Функция `price_changes(path, min_pct=5.0)` читает историю, для каждой книги сравнивает первую и последнюю цену и возвращает список словарей с `old`, `new`, `delta_pct`, оставляя только изменения по модулю не меньше `min_pct`. Ожидаемый вывод: `A Light in the Attic: 51.77 → 45.00 (-13.1%)` и итоговая строка `Изменений: 3`.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -93,6 +114,14 @@ tags: python, requests, BeautifulSoup, парсинг, цены, smtplib, уве
 ### Подсказка 5
 
 Чтение конфига: `json.load(open("config.json", encoding="utf-8"))` с `try/except (FileNotFoundError, json.JSONDecodeError)` и дефолтами. Обработка `Ctrl+C`: оберни основной цикл в `try: ... except KeyboardInterrupt: print("Завершение работы.")`. Паузу между запросами вставь прямо в цикл: `time.sleep(1)` после обработки страницы — так ты не создашь лишнюю нагрузку на сайт.
+### Подсказка 6
+
+Адрес страницы: `urljoin("https://books.toscrape.com/", "catalogue/page-2.html")` — конкатенация строк здесь ошибается на относительных ссылках. На последней странице `soup.select_one("li.next a")` вернёт `None`, поэтому цикл должен выглядеть так: `next_link = soup.select_one("li.next a")`, `if next_link is None: break`, `url = urljoin(url, next_link["href"])`. Дубликаты удобно копить в множестве названий и добавлять книгу, только если названия там ещё нет.
+
+### Подсказка 7
+
+Заголовок только при создании: `need_header = not os.path.exists(path)`, затем `open(path, "a", ...)` и `writer.writerow(...)` для каждой книги. Для анализа собери первый и последний снимок по каждой книге: пройди строки по порядку и запоминай `first[title]` и `last[title]`. Процент: `delta = (new - old) / old * 100`, фильтр — `abs(delta) >= min_pct`, вывод — `f"{title}: {old:.2f} → {new:.2f} ({delta:+.1f}%)"`.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -231,6 +260,94 @@ if __name__ == "__main__":
 ```
 
 Конфиг читается с дефолтами — программа работает даже без файла. Бесконечный цикл живёт, пока не нажат `Ctrl+C`: `KeyboardInterrupt` перехватывается, и программа прощается аккуратно, не оставляя «полуживых» состояний. Две паузы соблюдают вежливость: секунда между запросами и `interval` между циклами проверки — так сервер не перегружается.
+### Разбор 6
+
+```python
+import time
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
+
+
+def crawl_catalog(session, pages=3):
+    url = "https://books.toscrape.com/"
+    books = []
+    seen = set()
+
+    for page in range(1, pages + 1):
+        html = get_page(url, session)
+        if html is None:
+            break
+        soup = BeautifulSoup(html, "html.parser")
+        new_on_page = 0
+        for book in parse_books(html):
+            if book["title"] in seen:
+                continue
+            seen.add(book["title"])
+            books.append(book)
+            new_on_page += 1
+        print(f"Страница {page}: {new_on_page} книг, всего {len(books)}")
+
+        next_link = soup.select_one("li.next a")
+        if next_link is None:
+            break
+        url = urljoin(url, next_link["href"])
+        time.sleep(1)
+
+    return books
+```
+
+`li.next a` — ссылка «next» в пагинаторе каталога; на последней странице её нет, поэтому проверка `is None` обязательна, иначе получим `TypeError` при попытке взять `["href"]` у `None`. `urljoin` учитывает текущий адрес и корректно разворачивает относительный `catalogue/page-2.html` в полный URL — ручная конкатенация дала бы `.../catalogue/catalogue/page-2.html`. Множество `seen` защищает от повторов: каталог может показать одну книгу на разных страницах, а для отчёта нужен уникальный список. Пауза в секунду между страницами — вежливость к учебному сайту. Счётчик `new_on_page` печатает именно добавленные книги, поэтому по логу сразу видно, где кончились новинки.
+
+### Разбор 7
+
+```python
+import csv
+import os
+from datetime import datetime
+
+
+def save_snapshot(books, path="history.csv"):
+    need_header = not os.path.exists(path)
+    ts = datetime.now().isoformat(timespec="seconds")
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["timestamp", "title", "price"])
+        if need_header:
+            writer.writeheader()
+        for book in books:
+            writer.writerow({"timestamp": ts, "title": book["title"],
+                             "price": book["price"]})
+
+
+def price_changes(path, min_pct=5.0):
+    with open(path, encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    first, last = {}, {}
+    for row in rows:
+        title = row["title"]
+        price = float(row["price"])
+        first.setdefault(title, price)
+        last[title] = price
+
+    changes = []
+    for title, old in first.items():
+        new = last[title]
+        if old == 0:
+            continue
+        delta = (new - old) / old * 100
+        if abs(delta) >= min_pct:
+            changes.append({"title": title, "old": old, "new": new,
+                            "delta_pct": round(delta, 1)})
+    return sorted(changes, key=lambda c: c["delta_pct"])
+
+
+for c in price_changes("history.csv"):
+    print(f"{c['title']}: {c['old']:.2f} → {c['new']:.2f} ({c['delta_pct']:+.1f}%)")
+print("Изменений:", len(price_changes("history.csv")))
+```
+
+История — обычный CSV, который дописывается при каждом запуске: строки идут в хронологическом порядке, поэтому первая встреченная цена книги — самая старая, последняя — свежая. `os.path.exists` нужен, чтобы заголовок появился ровно один раз: `writeheader()` при каждом запуске ломал бы файл повторяющимися шапками. `setdefault` записывает цену только при первом появлении книги, а обычное присваивание в `last` всегда перезаписывает её последним значением — один проход даёт обе границы. Процентное изменение нормирует разницу: подешевела книга на 6.77 фунта — это много при цене 51.77 и мало при 500. Фильтр `abs(delta) >= min_pct` отбрасывает колебания в пределах погрешности, а сортировка по `delta_pct` ставит самые сильные падения первыми.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -313,4 +430,35 @@ select() возвращает список всех совпадений; select
 - Остановить программу
 * Правильный ответ: try/except FileNotFoundError с дефолтами
 Программа продолжает работать с настройками по умолчанию, даже если конфиг не создан.
+Зачем нужен `urljoin`, если можно сложить строки?
+- Он корректно разворачивает относительные ссылки с учётом текущего адреса
+- Он ускоряет загрузку страницы
+- Он убирает дубликаты книг
+- Он проверяет статус ответа
+* Правильный ответ: Он корректно разворачивает относительные ссылки с учётом текущего адреса
+Ручная конкатенация даёт неверный путь, например с повторённым каталогом.
+
+Что вернёт `soup.select_one("li.next a")` на последней странице каталога?
+- `None`
+- Пустую строку
+- Ссылку на первую страницу
+- Ошибку парсинга
+* Правильный ответ: `None`
+`select_one` возвращает `None`, если совпадений нет; это и есть сигнал закончить обход.
+
+Как записать заголовок CSV только при создании файла?
+- Проверить `os.path.exists(path)` перед открытием
+- Всегда вызывать `writeheader()`
+- Открыть файл в режиме `"r"`
+- Проверить длину списка строк после записи
+* Правильный ответ: Проверить `os.path.exists(path)` перед открытием
+Иначе при каждом запуске в файл добавлялась бы новая строка заголовка.
+
+Как посчитать процент изменения цены?
+- `(new - old) / old * 100`
+- `(new - old) * 100`
+- `new / 100 - old`
+- `old / new * 100`
+* Правильный ответ: `(new - old) / old * 100`
+Разница делится на старую цену — получается относительное изменение в процентах.
 <!--/QUIZ-->

@@ -378,3 +378,4 @@ class ViewTests(TestCase):
         r = self.client.get(reverse('profile'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Достижения')
+        self.assertContains(r, 'Карта навыков')

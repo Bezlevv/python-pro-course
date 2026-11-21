@@ -140,6 +140,24 @@ def me(user: User = Depends(get_current_user)):
 - Отдавай данные только по HTTPS, чтобы токен не улетел по сети.
 - Не клади в payload секретные данные (пароль, данные карты) — payload читается всеми.
 
+## Весь цикл входа на одной схеме
+
+Соберём разрозненные шаги в единую картину: что происходит от ввода пароля до защищённого запроса.
+
+```mermaid
+sequenceDiagram
+    participant K as "Клиент"
+    participant S as "Сервер"
+    K->>S: "POST /login: имя и пароль"
+    S->>S: "verify() по bcrypt-хэшу"
+    S-->>K: "JWT: header.payload.signature"
+    K->>S: "GET /me + заголовок Authorization"
+    S->>S: "decode() и проверка exp"
+    S-->>K: "200 и данные пользователя"
+```
+
+Ключевой момент: пароль сверяется с хэшем только на входе, а дальше клиент доказывает право на запрос подписанным токеном — сервер каждый раз проверяет подпись и срок, но пароль больше не нужен.
+
 ## Итог урока
 
 Мы разобрались, почему пароли хэшируют (bcrypt + соль), что такое JWT и как устроена его подпись, как создать и проверить токен через `pyjwt`, и как с помощью зависимостей FastAPI защитить эндпоинты. Теперь твой сервис может отличать «своих» от «чужих».
@@ -164,6 +182,11 @@ def me(user: User = Depends(get_current_user)):
 
 ### Задача 5
 Доработай вспомогательные функции из задачи 3: сделай так, чтобы `SECRET_KEY` читался из переменной окружения: `os.environ.get("SECRET_KEY", "dev-secret")`. Затем добавь в `create_token` обязательное поле `exp` (срок 1 час) и убедись, что токен без `exp` (созданный через отдельную функцию `create_token_no_exp`) декодируется без ошибки. Объясни в комментарии, почему токен без `exp` опасен. Запусти скрипт и опиши результаты.
+### Задача 6
+Создай скрипт `refresh_flow.py` и опиши в нём работу пары токенов. Напиши `create_token(user_id, token_type, lifetime_seconds)`: в payload кладутся `sub` (строка), `type` (переданный тип) и `exp` (сейчас + `lifetime_seconds`). На её основе сделай `create_access_token(user_id)` — тип `access`, срок 15 минут, и `create_refresh_token(user_id)` — тип `refresh`, срок 7 дней. Функция `refresh_access_token(token)` декодирует токен, проверяет, что `payload.get("type") == "refresh"`, иначе поднимает `ValueError("Нужен refresh-токен")`, и возвращает новый access-токен для того же `sub`. В основном блоке: 1) выпусти пару для пользователя 42, обменяй refresh на новый access и выведи `1) Новый access для sub=42`; 2) попробуй передать в обмен сам access-токен — поймай `ValueError` и выведи его текст во второй строке; 3) выпусти refresh с `lifetime_seconds=-1` и попробуй обменять — выведи класс исключения. Запусти скрипт и сверь вывод с ожидаемым.
+
+### Задача 7
+Создай скрипт `roles.py`, который различает аутентификацию и авторизацию. Пользователи хранятся в словаре без базы: `{1: {"username": "anya", "role": "user"}, 2: {"username": "admin", "role": "admin"}}`. Напиши `create_token(user_id)` (срок 1 час, `sub`) и `get_current_user(token)`, который декодирует токен, находит пользователя по id из `sub` и поднимает `HTTPException(status_code=401, detail="Неверный токен")` при ошибке `jwt.PyJWTError` или отсутствии пользователя. Затем `get_current_admin(token)`: вызывает `get_current_user`, и если роль не `admin`, поднимает `HTTPException(status_code=403, detail="Недостаточно прав")`. Покажи, что эндпоинт объявляется как `def admin_stats(user=Depends(get_current_admin))`. В основном блоке: выпусти токен для админа и для обычного пользователя, вызови `get_current_admin` с обоими и напечатай либо `Админ: admin`, либо `403 Недостаточно прав`, поймав `HTTPException`. Запусти скрипт и опиши вывод.
 <!--/TASK-->
 
 <!--HINT-->
@@ -181,6 +204,11 @@ def me(user: User = Depends(get_current_user)):
 
 ### Подсказка 5
 `import os`; `SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret")`. Отсутствие `exp` означает, что токен никогда не истекает: если токен украдут, он будет работать вечно. Проверь: `read_token` должен отклонять только токены с неверной подписью или просроченные.
+### Подсказка 6
+Поле `type` — обычное поле payload, добавь его рядом с `sub` и `exp`: `{"sub": str(user_id), "type": token_type, "exp": ...}`. Проверку типа делай после `jwt.decode`, но внутри `try`: `if payload.get("type") != "refresh": raise ValueError("Нужен refresh-токен")`. Просроченный refresh лови отдельно: `jwt.ExpiredSignatureError` наследуется от `jwt.PyJWTError`, поэтому порядок `except` важен. `ValueError` не перехватывай блоком `except jwt.PyJWTError` — это разные иерархии.
+
+### Подсказка 7
+`get_current_admin` — обычная зависимость, которая зависит от другой: `def get_current_admin(token: str = Depends(oauth2_scheme))` или, для нашего скрипта, просто принимает токен строкой и внутри вызывает `get_current_user(token)`. Разница кодов важна: 401 — «я не знаю, кто ты», 403 — «я знаю, кто ты, но тебе нельзя». `HTTPException` из FastAPI хранит `status_code` и `detail`, поэтому в `except HTTPException as exc` печатай именно их.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -416,6 +444,125 @@ print("Токен с exp прочитан, sub =", read_token(good)["sub"])
 ```
 
 Разбор: ключ больше не зашит в коде — он читается из переменной окружения с запасным вариантом для разработки. Это правило безопасности: если код попадёт в публичный репозиторий, секрет не утечёт. Эксперимент повторяет вывод задачи 3: токен без `exp` читается без ошибок — срок его действия бесконечен. Поэтому в `create_token` поле `exp` обязательно, а `create_token_no_exp` существует только для демонстрации угрозы. В реальном приложении такие вспомогательные функции не должны попадать в продакшен-код.
+### Разбор 6
+Полный код `refresh_flow.py`:
+
+```python
+import jwt
+from datetime import datetime, timedelta, timezone
+
+SECRET_KEY = "dev-secret"
+
+def create_token(user_id: int, token_type: str, lifetime_seconds: int) -> str:
+    payload = {
+        "sub": str(user_id),
+        "type": token_type,
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+def create_access_token(user_id: int) -> str:
+    return create_token(user_id, "access", 15 * 60)
+
+def create_refresh_token(user_id: int) -> str:
+    return create_token(user_id, "refresh", 7 * 24 * 60 * 60)
+
+def refresh_access_token(token: str) -> str:
+    payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    if payload.get("type") != "refresh":
+        raise ValueError("Нужен refresh-токен")
+    return create_access_token(int(payload["sub"]))
+
+access = create_access_token(42)
+refresh = create_refresh_token(42)
+
+new_access = refresh_access_token(refresh)
+print(f"1) Новый access для sub={jwt.decode(new_access, SECRET_KEY, algorithms=['HS256'])['sub']}")
+
+try:
+    refresh_access_token(access)
+except ValueError as exc:
+    print(f"2) {exc}")
+
+expired = create_token(42, "refresh", -1)
+try:
+    refresh_access_token(expired)
+except jwt.ExpiredSignatureError as exc:
+    print(f"3) {type(exc).__name__}")
+```
+
+Ожидаемый вывод:
+
+```
+1) Новый access для sub=42
+2) Нужен refresh-токен
+3) ExpiredSignatureError
+```
+
+Разбор: одна фабрика `create_token` с параметрами типа и срока убирает дублирование — access и refresh отличаются только этими двумя значениями. Поле `type` решает важную задачу: без него клиент мог бы прислать короткоживущий access-токен на эндпоинт `/refresh` и получить новый, то есть продлевать сессию бесконечно, даже если refresh украден или отозван. Проверка `payload.get("type") != "refresh"` закрывает эту дыру и поднимает `ValueError` — это ошибка логики, а не JWT, поэтому и класс другой. Третий сценарий показывает, что `jwt.decode` сам проверяет `exp`: до нашей проверки типа дело даже не доходит. В реальном сервисе refresh-токен ещё и хранят в базе с отметкой об отзыве, чтобы иметь возможность принудительно завершить сессию.
+
+### Разбор 7
+Полный код `roles.py`:
+
+```python
+import jwt
+from fastapi import Depends, HTTPException
+from datetime import datetime, timedelta, timezone
+
+SECRET_KEY = "dev-secret"
+
+USERS = {
+    1: {"username": "anya", "role": "user"},
+    2: {"username": "admin", "role": "admin"},
+}
+
+def create_token(user_id: int) -> str:
+    payload = {
+        "sub": str(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+def get_current_user(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Неверный токен")
+    user = USERS.get(int(payload["sub"]))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Неверный токен")
+    return user
+
+def get_current_admin(token: str) -> dict:
+    user = get_current_user(token)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    return user
+
+# в приложении это выглядело бы так:
+# @app.get("/admin/stats")
+# def admin_stats(user: dict = Depends(get_current_admin)): ...
+
+admin_token = create_token(2)
+user_token = create_token(1)
+
+admin = get_current_admin(admin_token)
+print(f"Админ: {admin['username']}")
+
+try:
+    get_current_admin(user_token)
+except HTTPException as exc:
+    print(f"{exc.status_code} {exc.detail}")
+```
+
+Ожидаемый вывод:
+
+```
+Админ: admin
+403 Недостаточно прав
+```
+
+Разбор: здесь наглядно видны две разные проверки. `get_current_user` отвечает за аутентификацию: он подтверждает, что токен подлинный и такой пользователь существует, и при неудаче отдаёт 401. `get_current_admin` отвечает за авторизацию: пользователь уже опознан, но ему не хватает прав, и это 403 — клиенту бессмысленно логиниться заново, его токен валиден, просто роль не та. Разделение на две зависимости даёт гибкость: `/me` цепляет только первую, а административные эндпоинты — вторую, и проверка роли не дублируется в каждом обработчике. Такой же приём используют для проверки владельца ресурса (например, «можно ли редактировать именно этот пост») — зависимость получает текущего пользователя и решает, пускать ли дальше.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -482,4 +629,35 @@ verify() повторяет хэширование с солью из сохра
 - Пароль не помещается в токен
 * Правильный ответ: Payload читается всеми без секретного ключа
 Подпись защищает токен от подделки, но содержимое payload декодирует любой — поэтому секретные данные туда класть нельзя.
+Что проверяет jwt.decode помимо подписи?
+- Срок действия exp
+- Размер токена
+- Скорость сети
+- Наличие пароля в payload
+* Правильный ответ: Срок действия exp
+Просроченный токен отклоняется с ExpiredSignatureError, даже если подпись верна.
+
+Зачем access-токену делают короткий срок жизни?
+- Чтобы ограничить ущерб, если токен украдут
+- Чтобы сервер меньше работал
+- Чтобы токен поместился в заголовок
+- Чтобы база не росла
+* Правильный ответ: Чтобы ограничить ущерб, если токен украдут
+Даже украденный access-токен действует недолго, а продление сессии требует refresh-токена, который хранится надёжнее.
+
+Чем 403 Forbidden отличается от 401 Unauthorized?
+- 401 — пользователь не опознан, 403 — опознан, но прав недостаточно
+- Это одно и то же
+- 403 — сервер сломался
+- 401 — нет такой страницы
+* Правильный ответ: 401 — пользователь не опознан, 403 — опознан, но прав недостаточно
+Клиенту с 401 стоит логиниться заново, а с 403 — нет: его токен валиден, просто роль не позволяет.
+
+Где правильно хранить SECRET_KEY?
+- В переменных окружения, а не в коде
+- Прямо в файле с приложением
+- В HTML-странице
+- В payload токена
+* Правильный ответ: В переменных окружения, а не в коде
+Код попадает в репозитории и логи: секрет, зашитый в него, считается скомпрометированным.
 <!--/QUIZ-->

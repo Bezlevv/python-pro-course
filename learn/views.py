@@ -27,6 +27,7 @@ from .models import (
 from .utils import (
     build_lesson_tasks,
     check_style,
+    has_mermaid,
     lesson_difficulty_label,
     normalize_output,
     render_markdown,
@@ -129,6 +130,57 @@ def _completed_modules_count(user):
     return total
 
 
+SKILL_DOMAINS = [
+    {'key': 'core', 'title': 'Основы и продвинутый Python', 'icon': '🐍',
+     'modules': ['01-basics', '02-advanced', '03-stdlib', '30-love']},
+    {'key': 'algo', 'title': 'Алгоритмы и структуры данных', 'icon': '🧩',
+     'modules': ['11-algorithms']},
+    {'key': 'web', 'title': 'Веб, API и фронтенд', 'icon': '🌐',
+     'modules': ['05-web', '22-drf', '31-frontend']},
+    {'key': 'db', 'title': 'Базы данных', 'icon': '🗄️',
+     'modules': ['13-databases']},
+    {'key': 'data_ml', 'title': 'Данные и ИИ', 'icon': '📊',
+     'modules': ['04-data', '06-neural', '16-ai', '25-mlops', '32-bigdata',
+                 '33-vision', '34-nlp', '35-scientific']},
+    {'key': 'tools', 'title': 'Инструменты и конкурентность', 'icon': '🛠️',
+     'modules': ['08-concurrency', '09-senior', '12-devops', '23-performance',
+                 '37-git-advanced', '38-iac']},
+    {'key': 'prod', 'title': 'Безопасность и продакшен', 'icon': '🔒',
+     'modules': ['10-deploy', '24-security', '36-observability']},
+    {'key': 'apps', 'title': 'Приложения и автоматизация', 'icon': '🎮',
+     'modules': ['18-tricks', '19-micropython', '26-games', '27-pyqt',
+                 '28-libs', '29-office']},
+    {'key': 'career', 'title': 'Карьера и практика', 'icon': '💼',
+     'modules': ['07-projects', '15-career', '20-works']},
+]
+
+
+def _skill_domains(user):
+    """Прогресс по доменам навыков (9 направлений)."""
+    done_lesson_ids = set()
+    if user.is_authenticated:
+        done_lesson_ids = set(
+            LessonProgress.objects.filter(user=user, completed_at__isnull=False)
+            .values_list('lesson_id', flat=True)
+        )
+    domain_rows = []
+    for domain in SKILL_DOMAINS:
+        lessons = list(
+            Lesson.objects.filter(module__slug__in=domain['modules'])
+            .exclude(is_exam=True)
+        )
+        total = len(lessons)
+        done = sum(1 for lesson in lessons if lesson.id in done_lesson_ids)
+        domain_rows.append({
+            'title': domain['title'],
+            'icon': domain['icon'],
+            'total': total,
+            'done': done,
+            'pct': round(done / total * 100) if total else 0,
+        })
+    return domain_rows
+
+
 def _award_achievements(user):
     """Выдаёт достижения, которые пользователь уже заслужил."""
     stats = {
@@ -180,6 +232,9 @@ def _lesson_ctx(request, lesson):
         'note': note,
         'is_exam': lesson.is_exam,
         'has_tests': bool(lesson.test_cases_md.strip()),
+        'has_mermaid': has_mermaid(
+            lesson.theory_md, lesson.task_md, lesson.hint_md, lesson.solution_md,
+        ),
         'rating': rating,
         'module_done': sum(1 for l in module_lessons if l.id in done_ids),
         'module_pct': round(sum(1 for l in module_lessons if l.id in done_ids) / len(module_lessons) * 100) if module_lessons else 0,
@@ -521,6 +576,7 @@ def profile(request):
         'level': level_info(user_xp),
         'next_lessons': next_lessons,
         'unfinished': unfinished,
+        'skill_domains': _skill_domains(request.user),
     })
 
 

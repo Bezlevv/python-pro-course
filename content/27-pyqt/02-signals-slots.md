@@ -159,6 +159,19 @@ button.clicked.disconnect()          # разорвать все соедине�
 
 Если вызвать `disconnect` без аргументов, а соединений несколько — Qt сорвёт все. Если передать конкретную функцию — только её.
 
+## Схема: как сигнал доходит до слота
+
+Все связи в Qt идут через `connect`, а данные передаются аргументами сигнала:
+
+```mermaid
+flowchart LR
+    A["clicked"] --> C["connect(слот)"]
+    B["textChanged(str)"] --> C
+    F["Свой сигнал: emit"] --> C
+    C --> D["Функция-обработчик"]
+    D --> E["label.setText(...)"]
+```
+
 ## Итог урока
 
 - Сигнал — событие виджета, слот — функция-обработчик;
@@ -184,6 +197,12 @@ button.clicked.disconnect()          # разорвать все соедине�
 
 ### Задача 5
 Создай окно с кнопкой и двумя функциями-слотами: `one` печатает `1`, `two` печатает `2`. Сначала подключи обе к `clicked` и убедись, что при одном нажатии печатаются обе строки. Затем отключи первую функцию через `disconnect(one)` и проверь, что теперь печатается только `2`.
+
+### Задача 6
+Сделай переключатель видимости пароля: поле `QLineEdit` в режиме `EchoMode.Password` и флажок `QCheckBox` с текстом «Показывать пароль». Когда флажок отмечен, поле должно переходить в режим `Normal` и показывать настоящие символы, когда снят — обратно в `Password`. Рядом добавь ярлык, который через сигнал `textChanged` показывает количество введённых символов. Ожидаемый вывод: при вводе `secret` ярлык показывает `Символов: 6`, а при установке флажка текст в поле становится видимым, но ярлык не меняется.
+
+### Задача 7
+Создай класс `Validator(QObject)` с собственным сигналом `checked = pyqtSignal(bool, str)` — он несёт два аргумента: успех проверки и сообщение. Метод `check(text)` считает пароль надёжным, если в нём не меньше 8 символов, и испускает сигнал с результатом. В окне размести поле пароля и кнопку «Проверить»; подключи сигнал к слоту, который пишет сообщение в ярлык и красит его в зелёный или красный цвет. Ожидаемый вывод: для `qwerty` ярлык показывает `Слишком короткий пароль` красным, для `qwerty123` — `Пароль надёжный` зелёным.
 <!--/TASK-->
 
 <!--HINT-->
@@ -201,6 +220,12 @@ button.clicked.disconnect()          # разорвать все соедине�
 
 ### Подсказка 5
 Определи `def one(): print("1")` и `def two(): print("2")`. Подключи обе: `button.clicked.connect(one)` и `button.clicked.connect(two)`. Затем `button.clicked.disconnect(one)` — и нажимай кнопку снова. Проверь, что второй раз печатается только `2`.
+
+### Подсказка 6
+В обработчике флажка выбери режим: `mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password`, затем `password.setEchoMode(mode)`. Подключи `show_box.toggled.connect(toggle_echo)`. Счётчик символов — отдельный слот с параметром: `def update_len(text): hint.setText(f"Символов: {len(text)}")`, подключённый к `password.textChanged`.
+
+### Подсказка 7
+Объяви сигнал атрибутом класса: `checked = pyqtSignal(bool, str)`, а класс унаследуй от `QObject`. В `check` используй `self.checked.emit(True, "...")` и `self.checked.emit(False, "...")` — количество аргументов должно совпадать с объявлением. Слот-получатель принимает два параметра: `def on_result(ok, message):`. Цвет задавай через `label.setStyleSheet("color: green;")`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -378,6 +403,96 @@ sys.exit(app.exec())
 ```
 
 Теперь добавь перед `window.show()` строку `button.clicked.disconnect(one)`. После этого нажатия печатают только `2`. Что здесь происходит? Qt позволяет вешать несколько слотов на один сигнал: они вызываются в порядке подключения. `disconnect(one)` разрывает только соединение с функцией `one`, не трогая `two`. Попробуй также `button.clicked.disconnect()` без аргументов — он сорвёт все соединения, и кнопка перестанет что-либо печатать.
+
+### Разбор 6
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QWidget, QLineEdit, QCheckBox,
+                             QLabel, QVBoxLayout)
+
+app = QApplication(sys.argv)
+window = QWidget()
+window.setWindowTitle("Показать пароль")
+window.resize(320, 170)
+
+layout = QVBoxLayout(window)
+password = QLineEdit()
+password.setEchoMode(QLineEdit.EchoMode.Password)
+password.setPlaceholderText("Пароль")
+show_box = QCheckBox("Показывать пароль")
+hint = QLabel("Символов: 0")
+
+def toggle_echo(checked):
+    mode = QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+    password.setEchoMode(mode)
+
+def update_len(text):
+    hint.setText(f"Символов: {len(text)}")
+
+show_box.toggled.connect(toggle_echo)
+password.textChanged.connect(update_len)
+
+for widget in (password, show_box, hint):
+    layout.addWidget(widget)
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? Сигнал `toggled` передаёт булево состояние флажка, поэтому слот `toggle_echo` принимает один параметр `checked`. Внутри выбирается нужный режим `EchoMode`, и поле мгновенно перерисовывается. Второй сигнал — `textChanged` — передаёт новый текст строкой, и `update_len` считает его длину. Обрати внимание: смена режима не испускает `textChanged`, поэтому счётчик символов не дёргается при переключении видимости — это ровно то поведение, которое требуется. Тернарное выражение в `mode = ...` — компактная альтернатива `if/else` с присваиванием.
+
+### Разбор 7
+Решение:
+
+```python
+import sys
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtWidgets import (QApplication, QWidget, QLineEdit, QPushButton,
+                             QLabel, QVBoxLayout)
+
+class Validator(QObject):
+    checked = pyqtSignal(bool, str)
+
+    def check(self, text):
+        if len(text) < 8:
+            self.checked.emit(False, "Слишком короткий пароль")
+        else:
+            self.checked.emit(True, "Пароль надёжный")
+
+app = QApplication(sys.argv)
+window = QWidget()
+window.setWindowTitle("Проверка пароля")
+window.resize(320, 170)
+
+layout = QVBoxLayout(window)
+password = QLineEdit()
+password.setEchoMode(QLineEdit.EchoMode.Password)
+password.setPlaceholderText("Пароль")
+button = QPushButton("Проверить")
+result = QLabel("Введите пароль")
+
+validator = Validator()
+
+def on_result(ok, message):
+    result.setText(message)
+    result.setStyleSheet("color: green;" if ok else "color: red;")
+
+def on_click():
+    validator.check(password.text())
+
+validator.checked.connect(on_result)
+button.clicked.connect(on_click)
+
+for widget in (password, button, result):
+    layout.addWidget(widget)
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? `Validator` наследуется от `QObject` — без этого сигнал объявить нельзя. `pyqtSignal(bool, str)` описывает сигнал с двумя аргументами, и `emit` обязан передать ровно два значения, иначе Qt выбросит ошибку. Кнопка вызывает `on_click`, тот передаёт текст в `check`, а `check` решает, какой результат испустить. Слот `on_result` принимает `ok` и `message` и одновременно меняет текст и цвет ярлыка — один сигнал управляет двумя свойствами. Такая схема отделяет правило проверки от интерфейса: `Validator` можно переиспользовать в любом окне.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -450,4 +565,32 @@ Qt позволяет вешать любое число слотов; они в
 - Такой синтаксис вообще не скомпилируется
 * Правильный ответ: Вызов print("Нажата") выполнится сразу при подключении, а не по клику
 Скобки означают вызов. Нужен lambda: print("Нажата") или имя функции.
+
+Что делает вызов signal.emit(True, "Готово")?
+- Испускает сигнал с двумя аргументами
+- Подключает новый слот
+- Создаёт второй сигнал
+* Правильный ответ: Испускает сигнал с двумя аргументами
+Аргументы emit должны совпадать с объявлением pyqtSignal(bool, str).
+
+Сколько аргументов может нести собственный сигнал?
+- Столько, сколько указано при объявлении через pyqtSignal
+- Ровно один
+- Не больше двух
+* Правильный ответ: Столько, сколько указано при объявлении через pyqtSignal
+Типы и количество задаются в объявлении, emit должен им соответствовать.
+
+Почему слот, подключённый к textChanged, должен принимать параметр?
+- Сигнал передаёт новый текст аргументом
+- Иначе Qt выдаст ошибку синтаксиса
+- Чтобы вернуть текст обратно в поле
+* Правильный ответ: Сигнал передаёт новый текст аргументом
+Слот без параметров не примет строку, которую несёт textChanged.
+
+Что произойдёт при переключении QCheckBox в режим «показать пароль»?
+- Изменится только режим отображения, значение text() останется прежним
+- Поле очистится
+- Пароль будет удалён из памяти
+* Правильный ответ: Изменится только режим отображения, значение text() останется прежним
+EchoMode влияет на отрисовку, а не на данные.
 <!--/QUIZ-->

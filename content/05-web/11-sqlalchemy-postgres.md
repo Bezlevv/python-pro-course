@@ -172,6 +172,21 @@ print(user.posts[0].title)
 
 ORM защищает от SQL-инъекций (значения всегда экранируются), упрощает перенос между базами (SQLite → PostgreSQL — смена одной строки подключения) и делает код читаемым. Но за удобство приходится платить: сложные запросы на ORM бывают медленнее ручного SQL. Поэтому в больших проектах используют комбинацию: ORM для типовых операций, а «сырой» SQL — для тяжёлой аналитики.
 
+## Как устроен путь запроса
+
+Прежде чем перейти к практике, соберём в одну картину всё, что делает SQLAlchemy: от класса-модели до строки в PostgreSQL.
+
+```mermaid
+flowchart LR
+    A["Модели: Mapped"] --> B["Session: add / select"]
+    B --> C["commit()"]
+    C --> D["Engine"]
+    D --> E["PostgreSQL"]
+    F["Base.metadata.create_all"] --> D
+```
+
+`create_all` проходит по метаданным моделей и создаёт таблицы; дальше все операции идут через сессию, а сессия — через движок, который держит пул соединений с конкретной базой.
+
 ## Итог урока
 
 Мы узнали: как устроен SQLAlchemy (Core и ORM), как создать движок и подключиться к PostgreSQL, как описывать модели через `Mapped`/`mapped_column`, как работать с сессиями, выполнять CRUD и задавать связи между таблицами. Это фундамент для любого современного веб-приложения на Python.
@@ -199,6 +214,11 @@ ORM защищает от SQL-инъекций (значения всегда э
 
 ### Задача 5
 Доработай скрипт из задачи 4 (сохрани его как `relations.py`): добавь третьего автора и две его книги. Затем: 1) найди автора по имени через `select(Author).where(Author.name == ...)` и через `author.books` выведи все его книги в формате `Название (год)`; 2) найди одну конкретную книгу и выведи её автора через `book.author.name`; 3) выведи суммарное количество книг у каждого автора через `len(author.books)`. Запусти скрипт и опиши ожидаемый вывод.
+### Задача 6
+Создай скрипт `report.py` с базой `sqlite:///report.db`. Опиши модели `Author` (id, name) и `Book` (id, title, year, author_id с внешним ключом) — как в задаче 1. Добавь авторов: Лев Толстой, Эрих Мария Ремарк, Александр Пушкин и Николая Гоголя (у Гоголя книг не будет). Книги: Толстой — «Война и мир» (1869), «Анна Каренина» (1877), «Воскресение» (1899); Ремарк — «Три товарища» (1936), «На Западном фронте без перемен» (1929); Пушкин — «Евгений Онегин» (1833). Затем одним запросом с `select(Author.name, func.count(Book.id))`, `join` и `group_by` выведи, сколько книг у каждого автора: сначала строку `Авторов с книгами: N`, потом по строке `Имя: количество` в порядке убывания числа книг (при равенстве — по алфавиту), в конце `Всего книг: M`. Запусти скрипт и опиши ожидаемый вывод. Обрати внимание, попал ли Гоголь в отчёт и почему.
+
+### Задача 7
+Создай скрипт `unique_email.py` с базой `sqlite:///subscribers.db`. Опиши модель `Subscriber` (id, `email: Mapped[str] = mapped_column(unique=True)`). Напиши функцию `subscribe(session, email) -> bool`: она добавляет подписчика и делает `commit()`; если база отвергла вставку из-за дубликата (`IntegrityError`), функция делает `rollback()` и возвращает `False`, иначе `True`. Вызови функцию для адресов `anya@example.com`, `borya@example.com` и снова `anya@example.com`, печатая `Добавлен: <email>` или `Дубликат отклонён: <email>`. В конце посчитай подписчиков через `select(func.count(Subscriber.id))` и выведи `В базе: N подписчика`. Запусти скрипт: третий вызов не должен ломать программу и не должен добавлять вторую запись.
 <!--/TASK-->
 
 <!--HINT-->
@@ -216,6 +236,11 @@ ORM защищает от SQL-инъекций (значения всегда э
 
 ### Подсказка 5
 `relationship` с `back_populates` позволяет ходить по связи в обе стороны: `author.books` — список книг автора, `book.author` — объект автора. Не забудь `session.add_all` и `session.commit()` до чтения. Порядок книг в `author.books` не гарантирован — при желании отсортируй список в коде.
+### Подсказка 6
+Агрегаты живут в `sqlalchemy.func`: `from sqlalchemy import func`. Запрос: `select(Author.name, func.count(Book.id)).join(Book, Book.author_id == Author.id).group_by(Author.id).order_by(func.count(Book.id).desc(), Author.name)`. `session.execute(stmt)` вернёт строки-кортежи `(name, count)`, которые удобно распаковать в цикле `for name, total in session.execute(stmt)`. `join` — внутреннее соединение: авторы без книг в выборку не попадают, поэтому Гоголя в отчёте не будет. Сумму книг по всем авторам считай отдельным запросом `select(func.count(Book.id))`.
+
+### Подсказка 7
+`unique=True` в `mapped_column` создаёт в таблице ограничение уникальности: база физически не даст вставить второй такой же email. Нарушение проявляется на `commit()` как `sqlalchemy.exc.IntegrityError` — импортируй его явно. После ошибки обязателен `session.rollback()`: без него сессия останется в нерабочем состоянии, и следующий `add`/`commit` упадёт с `PendingRollbackError`. Счётчик: `session.scalar(select(func.count(Subscriber.id)))`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -513,6 +538,132 @@ print(f"Автор книги «Три товарища»: {some_book.author.nam
 ```
 
 Разбор: третий автор добавлен с двумя книгами — это наглядный пример отношения «один ко многим»: один автор, много книг. `author.books` возвращает список связанных книг, поэтому `len(author.books)` показывает их количество. Обратный ход — `book.author` — возвращает объект автора книги. Обе стороны связи работают благодаря `relationship(back_populates=...)`: SQLAlchemy и синхронизирует, и грузит связанные объекты при обращении. Именно так в реальных приложениях строятся связи «пользователь — его посты», «автор — его статьи» и так далее.
+### Разбор 6
+Полный код `report.py`:
+
+```python
+from sqlalchemy import create_engine, ForeignKey, func, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+
+class Base(DeclarativeBase):
+    pass
+
+class Author(Base):
+    __tablename__ = "authors"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column()
+    books: Mapped[list["Book"]] = relationship(back_populates="author")
+
+class Book(Base):
+    __tablename__ = "books"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column()
+    year: Mapped[int] = mapped_column()
+    author_id: Mapped[int] = mapped_column(ForeignKey("authors.id"))
+    author: Mapped["Author"] = relationship(back_populates="books")
+
+engine = create_engine("sqlite:///report.db")
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+session = Session()
+
+tolstoy = Author(name="Лев Толстой")
+remarque = Author(name="Эрих Мария Ремарк")
+pushkin = Author(name="Александр Пушкин")
+gogol = Author(name="Николай Гоголь")
+session.add_all([tolstoy, remarque, pushkin, gogol])
+session.flush()
+
+session.add_all([
+    Book(title="Война и мир", year=1869, author_id=tolstoy.id),
+    Book(title="Анна Каренина", year=1877, author_id=tolstoy.id),
+    Book(title="Воскресение", year=1899, author_id=tolstoy.id),
+    Book(title="Три товарища", year=1936, author_id=remarque.id),
+    Book(title="На Западном фронте без перемен", year=1929, author_id=remarque.id),
+    Book(title="Евгений Онегин", year=1833, author_id=pushkin.id),
+])
+session.commit()
+
+stmt = (
+    select(Author.name, func.count(Book.id))
+    .join(Book, Book.author_id == Author.id)
+    .group_by(Author.id)
+    .order_by(func.count(Book.id).desc(), Author.name)
+)
+rows = session.execute(stmt).all()
+
+print(f"Авторов с книгами: {len(rows)}")
+for name, total in rows:
+    print(f"{name}: {total}")
+
+print(f"Всего книг: {session.scalar(select(func.count(Book.id)))}")
+```
+
+Ожидаемый вывод:
+
+```
+Авторов с книгами: 3
+Лев Толстой: 3
+Эрих Мария Ремарк: 2
+Александр Пушкин: 1
+Всего книг: 6
+```
+
+Разбор: `select(Author.name, func.count(Book.id))` — это уже не выборка целых объектов, а выборка двух колонок, поэтому `session.execute(...)` возвращает строки-кортежи, а не модели; распаковка `for name, total in rows` работает именно благодаря этому. `join(Book, Book.author_id == Author.id)` превращается в SQL `JOIN books ON books.author_id = authors.id`, а `group_by(Author.id)` — в `GROUP BY authors.id`: база сама считает количество строк в каждой группе. Сортировка по `func.count(Book.id).desc()` ставит наверх самого плодовитого автора, второй ключ `Author.name` делает порядок предсказуемым при равном числе книг. Гоголь в отчёте отсутствует: `join` — внутреннее соединение, и автор без книг теряется. Если нужны и «нулевые» авторы, берут `outerjoin` и `func.coalesce(func.count(Book.id), 0)`. Агрегатные запросы вроде этого — типовой способ строить отчёты и счётчики для дашбордов, не выгружая все строки в Python.
+
+### Разбор 7
+Полный код `unique_email.py`:
+
+```python
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+
+class Base(DeclarativeBase):
+    pass
+
+class Subscriber(Base):
+    __tablename__ = "subscribers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+
+engine = create_engine("sqlite:///subscribers.db")
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+session = Session()
+
+def subscribe(session, email: str) -> bool:
+    session.add(Subscriber(email=email))
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        return False
+    return True
+
+for email in ("anya@example.com", "borya@example.com", "anya@example.com"):
+    if subscribe(session, email):
+        print(f"Добавлен: {email}")
+    else:
+        print(f"Дубликат отклонён: {email}")
+
+total = session.scalar(select(func.count(Subscriber.id)))
+print(f"В базе: {total} подписчика")
+```
+
+Ожидаемый вывод:
+
+```
+Добавлен: anya@example.com
+Добавлен: borya@example.com
+Дубликат отклонён: anya@example.com
+В базе: 2 подписчика
+```
+
+Разбор: `unique=True` — это не проверка в Python, а ограничение самой таблицы: SQLite (и PostgreSQL) создаёт уникальный индекс по столбцу `email` и физически не пропустит вторую такую строку. `session.add(...)` лишь кладёт объект в сессию, а реальный `INSERT` уходит в базу на `commit()` — именно там и возникает `IntegrityError`. Перехватив исключение, мы обязаны вызвать `session.rollback()`: после неудачной фиксации сессия остаётся в состоянии «транзакция сломана», и любой следующий запрос упадёт с `PendingRollbackError`. `rollback()` откатывает неудавшуюся вставку и возвращает сессию в рабочее состояние, поэтому третий вызов спокойно обрабатывается, а счётчик показывает 2. Такой приём «попробовать вставить — обработать конфликт» надёжнее предварительной проверки `select`: между проверкой и вставкой другой процесс может успеть добавить ту же запись, и только ограничение базы даёт настоящую гарантию.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -579,4 +730,35 @@ scalars() возвращает скалярные значения — объе�
 - Чтобы удалить таблицу
 * Правильный ответ: Чтобы отправить изменения в базу и получить id, не фиксируя их окончательно
 flush() выполняет INSERT в базе, после чего объект получает id — но commit() ещё не происходил, и изменения можно откатить.
+Как посчитать количество книг у каждого автора одним запросом?
+- Загрузить всех авторов и вызвать len(author.books) в цикле
+- Использовать func.count(Book.id) вместе с join и group_by
+- Вызвать session.commit() несколько раз
+- Отсортировать книги по году
+* Правильный ответ: Использовать func.count(Book.id) вместе с join и group_by
+Агрегат func.count в паре с group_by заставляет базу посчитать строки в каждой группе — без выгрузки всех объектов в Python.
+
+Что нужно сделать сразу после исключения IntegrityError при commit()?
+- Ничего, сессия восстановится сама
+- Вызвать session.rollback(), иначе сессия останется в нерабочем состоянии
+- Закрыть движок engine.dispose()
+- Повторить тот же commit() без изменений
+* Правильный ответ: Вызвать session.rollback(), иначе сессия останется в нерабочем состоянии
+После неудачной фиксации транзакция сломана: без rollback() следующая операция упадёт с PendingRollbackError.
+
+Что вернёт session.get(Book, 42), если книги с id 42 нет?
+- Исключение NoResultFound
+- None
+- Пустой список
+- Новый объект Book
+* Правильный ответ: None
+session.get() ищет по первичному ключу и возвращает None при отсутствии записи — удобно для проверок вида «есть или нет».
+
+Зачем в mapped_column указывают unique=True?
+- Чтобы база сама не допускала повторяющихся значений в этом столбце
+- Чтобы ускорить создание таблиц
+- Чтобы столбец стал первичным ключом
+- Чтобы значение шифровалось
+* Правильный ответ: Чтобы база сама не допускала повторяющихся значений в этом столбце
+Это ограничение на уровне схемы: создаётся уникальный индекс, и повторная вставка отклоняется с IntegrityError.
 <!--/QUIZ-->

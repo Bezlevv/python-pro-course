@@ -111,6 +111,21 @@ class CollectingTransport(Transport):
 
 Передав такой транспорт в `init(transport=CollectingTransport())`, ты получаешь детерминированные тесты без сети.
 
+## Путь события до Sentry
+
+Любое исключение или сообщение проходит один и тот же конвейер. Понимание этого пути объясняет, зачем нужны `before_send`, транспорт и `flush()`:
+
+```mermaid
+flowchart LR
+    A["Исключение"] --> B["sentry-sdk"]
+    B --> C["before_send"]
+    C --> D{"Секреты или шум?"}
+    D -->|"да"| E["Отбросить"]
+    D -->|"нет"| F["Отправить в Sentry"]
+```
+
+`before_send` — единственная точка, где можно изменить или отменить событие до отправки. Транспорт же отвечает за доставку: подменив его в тестах, мы получаем события локально и не зависим от сети.
+
 ## Лучшие практики
 
 - Не отправляй в Sentry чувствительные данные: PII, пароли, токены. Используй `before_send` и не клади секреты в `set_context`.
@@ -133,6 +148,11 @@ class CollectingTransport(Transport):
 
 ### Задача 5
 Добавь в `sentry_app.py` эндпоинт `GET /profile`, который добавляет пользователя (`sentry_sdk.set_user({"id": 42, "email": "x@example.com"})`) и тег `plan="pro"`, а затем вызывает `sentry_sdk.capture_message("profile viewed")`. В тесте проверь, что после запроса в `transport.events` появилось событие с `user.id == 42` и `tags["plan"] == "pro"`. Запусти `pytest test_sentry_app.py -v`.
+### Задача 6
+Расширь маскирование на вложенные структуры. Напиши `scrub_event(event: dict) -> dict`, которая рекурсивно обходит `event["extra"]`, `event["request"]["data"]`, `event["contexts"]` и `event["breadcrumbs"]["values"]`, заменяя на `"***"` значения ключей, содержащих `password`, `token`, `secret` или `card` (без учёта регистра). Функция должна корректно обрабатывать списки и вложенные словари, не падать на `None` и не менять исходный объект. В `test_scrub.py` проверь событие с `extra={"user": {"password": "x"}}`, `request={"data": {"card_number": "4111"}}` и breadcrumb с `token`; убедись, что все секреты заменены, а остальные поля сохранились. Ожидаемый вывод: `3 passed`.
+
+### Задача 7
+Проверь изоляцию контекста между запросами. Настрой `sentry_sdk.init(dsn="https://public@o0.ingest.us.sentry.io/0", transport=CollectingTransport())`. В тесте открой `with sentry_sdk.isolation_scope():`, внутри установи `set_user({"id": 42})` и вызови `capture_message("inside")`. Затем открой новую `isolation_scope()` без `set_user` и вызови `capture_message("outside")`. После `sentry_sdk.flush()` проверь, что у первого события `user["id"] == 42`, а у второго ключа `user` нет вовсе. Ожидаемый вывод: `1 passed` — контекст не протекает между scope.
 <!--/TASK-->
 
 <!--HINT-->
@@ -150,6 +170,11 @@ class CollectingTransport(Transport):
 
 ### Подсказка 5
 `set_user` и `set_tag` применяются к scope запроса. Проверяй `event["user"]["id"] == 42` и `event["tags"]["plan"] == "pro"`. Если событие не появилось — проверь, что `capture_message` вызывается внутри обработчика (это синхронная функция, она должна попасть в транспорт сразу).
+### Подсказка 6
+Рекурсивная функция удобнее всего выглядит так: если значение — `dict`, верни новый словарь, в котором «секретные» ключи заменены, а остальные обработаны рекурсивно; если `list` — список из рекурсивных вызовов; иначе верни значение как есть. Для проверки ключа используй `any(word in key.lower() for word in ("password", "token", "secret", "card"))`. Не мутируй вход: создавай новый объект, иначе тест «исходный словарь не изменился» не пройдёт.
+
+### Подсказка 7
+`isolation_scope()` создаёт дочернюю scope и восстанавливает предыдущую при выходе — это аналог `ContextVar` с токеном. События складывай в `CollectingTransport`, так как без транспорта SDK попытается идти в сеть. `flush()` дожидается отправки; без него список может остаться пустым.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -320,6 +345,99 @@ def test_profile_user_context():
 ```
 
 Что здесь происходит? Пока обрабатывается запрос, SDK держит scope: `set_user` и `set_tag` записываются в неё и попадают в событие. Это и есть «контекст» — без него ошибка выглядит как анонимный traceback, а с ним видно, какой пользователь и с каким тарифом пострадал. Именно такие поля позволяют отвечать на вопрос «кого это задело».
+### Разбор 6
+Решение (`scrub.py`):
+
+```python
+SECRET_WORDS = ("password", "token", "secret", "card")
+
+def scrub_value(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if any(word in key.lower() for word in SECRET_WORDS):
+                result[key] = "***"
+            else:
+                result[key] = scrub_value(item)
+        return result
+    if isinstance(value, list):
+        return [scrub_value(item) for item in value]
+    return value
+
+def scrub_event(event: dict) -> dict:
+    cleaned = dict(event)
+    if "extra" in cleaned:
+        cleaned["extra"] = scrub_value(cleaned["extra"])
+    if "request" in cleaned:
+        cleaned["request"] = scrub_value(cleaned["request"])
+    if "contexts" in cleaned:
+        cleaned["contexts"] = scrub_value(cleaned["contexts"])
+    if "breadcrumbs" in cleaned:
+        cleaned["breadcrumbs"] = scrub_value(cleaned["breadcrumbs"])
+    return cleaned
+```
+
+Тест (`test_scrub.py`):
+
+```python
+from scrub import scrub_event
+
+def test_nested_extra():
+    event = {"extra": {"user": {"password": "x", "name": "ann"}}}
+    cleaned = scrub_event(event)
+    assert cleaned["extra"]["user"]["password"] == "***"
+    assert cleaned["extra"]["user"]["name"] == "ann"
+    assert event["extra"]["user"]["password"] == "x"
+
+def test_request_card():
+    event = {"request": {"data": {"card_number": "4111", "amount": 100}}}
+    assert scrub_event(event)["request"]["data"]["card_number"] == "***"
+
+def test_breadcrumb_token():
+    event = {"breadcrumbs": {"values": [{"message": "login", "token": "abc"}]}}
+    assert scrub_event(event)["breadcrumbs"]["values"][0]["token"] == "***"
+```
+
+Что здесь происходит? Плоский фильтр из задачи 2 пропускает секреты, если они лежат глубже первого уровня: например, в `request.data` или в breadcrumb. Рекурсивный обход решает эту проблему, но требует аккуратности с типами: `None`, числа и строки должны возвращаться без изменений, а списки — обходиться поэлементно. Мы намеренно создаём новые словари вместо мутации входа: `before_send` может быть вызван несколько раз, и побочные эффекты в исходном событии затрудняют отладку. Такой «scrubber» стоит держать в отдельном модуле и покрывать тестами, потому что цена ошибки — утечка платёжных данных в сторонний сервис.
+
+### Разбор 7
+Решение (`test_scopes.py`):
+
+```python
+import sentry_sdk
+from sentry_sdk.transport import Transport
+
+class CollectingTransport(Transport):
+    def __init__(self, options=None):
+        super().__init__(options)
+        self.events = []
+
+    def capture_envelope(self, envelope):
+        event = envelope.get_event()
+        if event is not None:
+            self.events.append(event)
+
+def test_scope_isolation():
+    transport = CollectingTransport()
+    sentry_sdk.init(
+        dsn="https://public@o0.ingest.us.sentry.io/0",
+        transport=transport,
+        default_integrations=False,
+    )
+
+    with sentry_sdk.isolation_scope():
+        sentry_sdk.set_user({"id": 42})
+        sentry_sdk.capture_message("inside")
+
+    with sentry_sdk.isolation_scope():
+        sentry_sdk.capture_message("outside")
+
+    sentry_sdk.flush()
+    assert transport.events[0]["user"]["id"] == 42
+    assert "user" not in transport.events[1]
+```
+
+Что здесь происходит? Scope — это стек контекста Sentry: пользователь, теги, breadcrumbs и уровень. `isolation_scope()` делает новый слой и при выходе возвращает предыдущий, поэтому данные первого блока не видны во втором. Это критично для веб-сервера: без изоляции пользователь одного запроса «прилип» бы к событиям другого, и вы бы получили ложную привязку ошибок. `default_integrations=False` отключает автоинтеграции, чтобы тест не зависел от установленных библиотек, а `flush()` гарантирует, что транспорт получил все конверты до проверок. Обрати внимание: `capture_message` возвращает идентификатор события, но проверять удобнее сам список — он детерминирован и не требует сети.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -392,4 +510,31 @@ get_event() извлекает объект события из Envelope.
 - SDK будет писать события в файл
 * Правильный ответ: SDK отключится и не будет отправлять события
 Пустой DSN — режим локальной разработки без отправки.
+Что делает параметр ignore_errors в sentry_sdk.init()?
+- Игнорирует ошибки самого SDK
+- Не отправляет события для указанных типов исключений
+- Понижает уровень всех событий
+* Правильный ответ: Не отправляет события для указанных типов исключений
+Это удобно для ожидаемых исключений, которые не должны шуметь в алертах.
+
+Зачем нужен параметр release?
+- Чтобы связать ошибки с версией кода
+- Чтобы ускорить отправку
+- Чтобы включить breadcrumbs
+* Правильный ответ: Чтобы связать ошибки с версией кода
+Формат имя_проекта@версия позволяет увидеть, в каком релизе появилась ошибка.
+
+Что делает with sentry_sdk.isolation_scope()?
+- Создаёт изолированный контекст и восстанавливает предыдущий при выходе
+- Отключает отправку событий
+- Очищает все события проекта
+* Правильный ответ: Создаёт изолированный контекст и восстанавливает предыдущий при выходе
+Именно так данные пользователя одного запроса не попадают в события другого.
+
+Что произойдёт, если before_send вернёт изменённый event?
+- Изменения будут проигнорированы
+- В Sentry уйдёт изменённое событие
+- SDK выбросит исключение
+* Правильный ответ: В Sentry уйдёт изменённое событие
+Возвращённый словарь — это финальный payload, который отправит транспорт.
 <!--/QUIZ-->

@@ -205,6 +205,23 @@ path("new/", views.PostCreateView.as_view(), name="post_create"),
 
 `{% csrf_token %}` — обязательная защита от подделки запросов, встроенная в Django.
 
+## Схема: как Django собирает страницу
+
+Django часто называют MVT-фреймворком: модель, представление, шаблон. Схема показывает, кто за что отвечает при открытии списка статей.
+
+```mermaid
+flowchart LR
+    A["Браузер: GET /?page=2"] --> B["urls.py"]
+    B --> C["PostListView"]
+    C --> D["Post.objects — ORM"]
+    D --> E[("SQLite db.sqlite3")]
+    E --> D
+    D --> F["post_list.html"]
+    F --> G["HTML-ответ"]
+```
+
+Представление не пишет SQL руками: оно просит объекты у менеджера Post.objects, ORM строит запрос, а шаблон только раскладывает готовый список по HTML.
+
 ## Итог урока
 
 Мы научились:
@@ -230,6 +247,12 @@ path("new/", views.PostCreateView.as_view(), name="post_create"),
 
 ### Задача 5
 Добавь модель Category (name CharField, slug SlugField unique=True), связь ForeignKey в Post: on_delete=models.CASCADE, related_name="posts", null=True, blank=True. Выполни миграции и зарегистрируй Category в админке. Добавь представление PostsByCategoryView (ListView с переопределённым get_queryset, фильтрующим по category_slug из self.kwargs через get_object_or_404) и маршрут "category/<slug:category_slug>/" с именем posts_by_category. В шаблоне списка выводи название категории со ссылкой. Ожидаемый результат: страница категории показывает только её статьи.
+### Задача 6
+Добавь в список статей постраничную навигацию: когда записей станет много, одна длинная страница неудобна. В PostListView задай paginate_by = 2, а в шаблон post_list.html добавь блок навигации: ссылку «Назад» при page_obj.has_previous, текст «Страница N из M» через page_obj.number и page_obj.paginator.num_pages и ссылку «Вперёд» при page_obj.has_next. Адрес страницы передавай query-параметром: ?page={{ page_obj.next_page_number }}. Создай через админку пять статей и проверь /?page=1, /?page=2 и /?page=3. Ожидаемый результат: на каждой странице ровно по две статьи в порядке убывания даты, на первой странице нет ссылки «Назад», на последней — «Вперёд», а «Страница 3 из 3» соответствует действительности.
+
+### Задача 7
+Добавь поиск по заголовкам статей. Переопредели get_queryset в PostListView: возьми queryset = super().get_queryset(), прочитай строку запроса через self.request.GET.get("q", "").strip() и, если она не пустая, отфильтруй записи через filter(title__icontains=query). Переопредели get_context_data, чтобы передать в шаблон query и сохранить текст в поле после отправки. В шаблоне добавь форму с method="get", полем input name="q" и кнопкой «Найти», а ссылки пагинации построй так, чтобы они не теряли q. Ожидаемый результат: запрос /?q=python показывает только статьи, в заголовке которых есть «Python» в любом регистре, а сочетание /?q=python&page=2 листает уже отфильтрованный список.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -247,6 +270,12 @@ reverse_lazy нужен вместо reverse, потому что при имп�
 
 ### Подсказка 5
 В get_queryset бери категорию так: get_object_or_404(Category, slug=self.kwargs["category_slug"]) и возвращай category.posts.all().order_by("-created_at"). После добавления поля category обязательно выполни makemigrations и migrate. В шаблоне используй {% if post.category %}, чтобы не выводить ссылку для статей без категории.
+### Подсказка 6
+Пагинация в ListView включается одной строкой: paginate_by = 2. Django сам нарежет queryset и положит в контекст page_obj — его и используй в шаблоне вместо ручного среза. У page_obj есть методы has_previous(), has_next(), previous_page_number(), next_page_number() и атрибуты number и paginator.num_pages. Не забывай: page_obj доступен только при включённой пагинации.
+
+### Подсказка 7
+super().get_queryset() возвращает QuerySet с учётом ordering — отталкивайся от него, а не от Post.objects. Метод lookups __icontains ищет подстроку без учёта регистра, в отличие от __contains. В шаблоне форма поиска должна быть с method="get", иначе параметр не попадёт в URL. В ссылках пагинации добавь &q={{ query }}, иначе переход на вторую страницу потеряет фильтр.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -512,6 +541,67 @@ urlpatterns = [
 ```
 
 Модель Category получила slug для красивых и уникальных URL. ForeignKey с related_name="posts" создаёт связь «один ко многим»: у каждой статьи одна категория, а у категории — много статей, доступных через category.posts.all(). PostsByCategoryView переопределяет get_queryset: берёт категорию по слагу из URL через self.kwargs["category_slug"] и возвращает только её статьи. get_object_or_404 вместо get вернёт страницу 404, если категория не найдена. В шаблоне блок {% if post.category %} защищает от статей без категории. После изменения моделей миграции обязательны, иначе Django будет ругаться на отсутствие таблицы.
+### Разбор 6
+Включаем пагинацию в представлении и шаблоне:
+
+```python
+class PostListView(ListView):
+    model = Post
+    template_name = "posts/post_list.html"
+    context_object_name = "posts"
+    ordering = ["-created_at"]
+    paginate_by = 2
+```
+
+```html
+{% for post in posts %}
+  <h2><a href="{% url 'post_detail' post.pk %}">{{ post.title }}</a></h2>
+{% endfor %}
+
+{% if page_obj.has_previous %}
+  <a href="?page={{ page_obj.previous_page_number }}">Назад</a>
+{% endif %}
+<span>Страница {{ page_obj.number }} из {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}
+  <a href="?page={{ page_obj.next_page_number }}">Вперёд</a>
+{% endif %}
+```
+
+paginate_by — это не косметика, а изменение самого запроса: Django добавляет LIMIT и OFFSET, поэтому из базы приходит только нужная порция записей, а не весь блог. В контекст автоматически попадает page_obj — объект Page из django.core.paginator; в нём есть и сам срез (итерируемый, его удобно передать в for), и ссылка на paginator с общим числом страниц. Методы has_previous() и has_next() избавляют от ручных проверок вида page_obj.number > 1 и не дают отрисовать ссылку на несуществующую страницу. Если запросить ?page=99, ListView вернёт 404 — это встроенное поведение, и оно правильное: такой страницы нет. Обрати внимание, что context_object_name = "posts" остался: в шаблоне мы по-прежнему пишем for post in posts, а page_obj — отдельная переменная, которую добавляет пагинатор.
+
+### Разбор 7
+Поиск по заголовку без потери пагинации:
+
+```python
+class PostListView(ListView):
+    model = Post
+    template_name = "posts/post_list.html"
+    context_object_name = "posts"
+    ordering = ["-created_at"]
+    paginate_by = 2
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        query = self.request.GET.get("q", "").strip()
+        if query:
+            queryset = queryset.filter(title__icontains=query)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["query"] = self.request.GET.get("q", "").strip()
+        return context
+```
+
+```html
+<form method="get">
+  <input type="text" name="q" value="{{ query }}" placeholder="Поиск по заголовку">
+  <button type="submit">Найти</button>
+</form>
+```
+
+Переопределение get_queryset — штатная точка расширения ListView: всё остальное (сортировка, пагинация, контекст) продолжает работать. Мы вызываем super().get_queryset(), чтобы получить базовый QuerySet с ordering из класса, и только потом сужаем его фильтром. Lookup title__icontains превращается в SQL с оператором LIKE и приводит обе стороны к нижнему регистру, поэтому «python», «Python» и «PYTHON» находят одно и то же; у __contains регистр важен, и на SQLite это часто ловушка. Пустая строка после strip() означает «фильтра нет» — важно не отфильтровать всё по пустому шаблону. Вторая часть — get_context_data: без неё поле поиска после отправки очистится, потому что шаблон не знает, что искал пользователь. Форма с method="get" отправляет ?q=... в URL, а не в тело запроса: ссылку можно сохранить в закладки и передать коллеге. Ссылки пагинации должны выглядеть как ?q={{ query }}&page={{ page_obj.next_page_number }}, иначе переход на вторую страницу потеряет фильтр и покажет весь блог.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -578,4 +668,36 @@ ListView сам получает все объекты модели и клад�
 - Чтобы установить библиотеки
 * Правильный ответ: Чтобы переносить изменения моделей в схему базы данных
 makemigrations готовит описание изменений, а migrate применяет его к базе.
+Что делает paginate_by = 2 в ListView?
+- Показывает только две последние записи
+- Разбивает список на страницы по две записи и кладёт page_obj в контекст
+- Сортирует записи по два поля
+- Ограничивает количество полей в форме
+* Правильный ответ: Разбивает список на страницы по две записи и кладёт page_obj в контекст
+ListView добавляет к запросу LIMIT и OFFSET, а в шаблон передаёт объект Page с методами has_next() и number.
+
+Где в шаблоне доступен объект текущей страницы?
+- В переменной posts
+- В page_obj
+- В request.page
+- В paginator.object
+* Правильный ответ: В page_obj
+page_obj появляется в контексте автоматически, когда включён paginate_by; через него получают номер страницы и ссылки на соседние.
+
+Чем lookup title__icontains отличается от title__contains?
+- Ищет только точное совпадение
+- Ищет подстроку без учёта регистра
+- Ищет по всем полям модели
+- Работает только с числами
+* Правильный ответ: Ищет подстроку без учёта регистра
+Буква i означает insensitive: «Python» и «python» найдутся одинаково, что для поиска по заголовкам важнее скорости.
+
+Почему форму поиска отправляют методом GET?
+- Параметр попадает в URL, и ссылкой можно поделиться
+- GET быстрее POST
+- POST не поддерживает input
+- GET автоматически сохраняет данные в базу
+* Правильный ответ: Параметр попадает в URL, и ссылкой можно поделиться
+Кроме того, GET не меняет данные на сервере, поэтому поиск логично делать именно им.
+
 <!--/QUIZ-->

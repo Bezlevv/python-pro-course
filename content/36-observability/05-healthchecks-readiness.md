@@ -104,6 +104,23 @@ groups:
 
 Современный подход — строить алерты на **SLO** (Service Level Objective): например, «99.9% запросов должны завершаться успешно за месяц». Гореть должен не сам факт нарушения, а **burn rate** — скорость «сгорания» бюджета ошибок. Если за 30 дней допустимо 0.1% ошибок, то 1% ошибок за час — это burn rate 10×, и нужно алертить немедленно. Простое правило: алертить, когда доля ошибок за 5 минут превышает целевой уровень в несколько раз.
 
+## Как проверки управляют трафиком
+
+Три проверки решают три разные задачи, и путать их дорого: одна даёт приложению время прогреться, вторая убирает поду из ротации, третья перезапускает зависший процесс.
+
+```mermaid
+flowchart TD
+    A["Под стартует"] --> B{"startupz = 200?"}
+    B -->|"нет"| C["Ждать прогрева"]
+    B -->|"да"| D{"readyz = 200?"}
+    D -->|"нет"| E["Убрать из ротации"]
+    D -->|"да"| F["Трафик идёт"]
+    F --> G{"healthz = 200?"}
+    G -->|"нет"| H["Перезапуск пода"]
+```
+
+Ключевое отличие от обычного «пингования»: каждая проверка имеет свою реакцию оркестратора. Поэтому `healthz` не должен знать о базе, а `readyz` не должен перезапускать контейнер.
+
 ## Лучшие практики
 
 - Разделяй liveness и readiness в отдельные эндпоинты с разными именами (`/healthz`, `/readyz`).
@@ -127,6 +144,11 @@ groups:
 
 ### Задача 5
 Создай файл `alerts.yml` с двумя правилами алертов: `HighErrorRate` (доля ошибок `http_errors_total / http_requests_total` за 5 минут больше 0.05, `for: 10m`, severity critical) и `ServiceDown` (метрика `up{job="orders"}` равна 0 в течение 2 минут, severity critical). Затем напиши в комментарии (внутри YAML) объяснение: почему `for` защищает от ложных срабатываний и почему для `ServiceDown` хватает короткого `for`.
+### Задача 6
+Защити readiness от зависших зависимостей. Напиши класс `TimeoutChecker(HealthChecker)`, который принимает внутренний чекер и `timeout` в секундах, запускает `inner.check()` в `ThreadPoolExecutor(max_workers=1)` и ждёт результат через `future.result(timeout=...)`. При `TimeoutError` или любом исключении внутреннего чекера возвращай `False`, а executor закрывай через `shutdown(wait=False, cancel_futures=True)` — иначе выход из `with` будет ждать зависшую проверку. В `test_timeout.py` проверь три случая: быстрый `DummyChecker(True)` даёт `True`, `SlowChecker` со сном 0.3 с и `timeout=0.05` даёт `False`, а чекер, бросающий исключение, тоже даёт `False`. Ожидаемый вывод: `3 passed` и время выполнения меньше секунды.
+
+### Задача 7
+Добавь startup-проверку. Реализуй фабрику `create_app(startup_ready: bool = False)`, которая создаёт FastAPI с тремя эндпоинтами: `/healthz` всегда 200, `/startupz` возвращает 200 только после прогрева (иначе 503 с `{"status": "starting"}`), `/readyz` возвращает 503, пока прогрев не завершён, и 200 после. Добавь `POST /internal/startup-complete`, который переключает флаг в `state = {"ready": startup_ready}`. В `test_startup.py` проверь последовательность: до прогрева `/healthz` — 200, `/startupz` и `/readyz` — 503; после вызова `startup-complete` оба — 200. Ожидаемый вывод: `1 passed`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -144,6 +166,11 @@ groups:
 
 ### Подсказка 5
 Правило YAML: `groups:` → `rules:` → `alert:`, `expr:`, `for:`, `labels:`, `annotations:`. Для `ServiceDown` используй `expr: up{job="orders"} == 0`. В комментарии: короткий `for` для аптайма оправдан, потому что «сервис недоступен» — это уже факт, а не флуктуация.
+### Подсказка 6
+`future.result(timeout=...)` бросает `concurrent.futures.TimeoutError`. Важно не использовать `with ThreadPoolExecutor(...)`, потому что `__exit__` вызывает `shutdown(wait=True)` и будет ждать завершения зависшей функции — весь смысл таймаута потеряется. Создавай executor явно и в `finally` вызывай `shutdown(wait=False, cancel_futures=True)`. Помни: Python не умеет убивать поток, поэтому таймаут защищает эндпоинт, но не освобождает ресурс мгновенно.
+
+### Подсказка 7
+Фабрика полезна тем, что в тестах можно создать приложение сразу в двух состояниях. Флаг держи в замыкании или в `app.state.ready`, а не в глобальной переменной модуля — иначе тесты повлияют друг на друга. Для 503 используй `JSONResponse(..., status_code=503)`, иначе FastAPI вернёт 200.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -308,6 +335,116 @@ groups:
 ```
 
 Что здесь происходит? `for` — это «подтверждающий» интервал: тревога сработает только если выражение истинно непрерывно в течение указанного времени. Для доли ошибок 10 минут отсекают кратковременные всплески (один неудачный тест, перезапуск поды). Для `ServiceDown` хватает 2 минут: `up == 0` — уже факт остановки, а не флуктуация; тянуть с реакцией на полную недоступность сервиса нельзя.
+### Разбор 6
+Решение (`timeouts.py`):
+
+```python
+import concurrent.futures
+
+from health import HealthChecker
+
+class TimeoutChecker(HealthChecker):
+    def __init__(self, inner: HealthChecker, timeout: float = 0.5):
+        self.inner = inner
+        self.timeout = timeout
+
+    def check(self) -> bool:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.inner.check)
+        try:
+            return bool(future.result(timeout=self.timeout))
+        except Exception:
+            return False
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+```
+
+Тест (`test_timeout.py`):
+
+```python
+import time
+
+from health import DummyChecker, HealthChecker
+from timeouts import TimeoutChecker
+
+class SlowChecker(HealthChecker):
+    def check(self) -> bool:
+        time.sleep(0.3)
+        return True
+
+class BrokenChecker(HealthChecker):
+    def check(self) -> bool:
+        raise ConnectionError("db is down")
+
+def test_fast_checker_passes():
+    assert TimeoutChecker(DummyChecker(True), timeout=0.5).check() is True
+
+def test_slow_checker_times_out():
+    started = time.perf_counter()
+    assert TimeoutChecker(SlowChecker(), timeout=0.05).check() is False
+    assert time.perf_counter() - started < 0.2
+
+def test_exception_is_unavailable():
+    assert TimeoutChecker(BrokenChecker(), timeout=0.5).check() is False
+```
+
+Что здесь происходит? Readiness обязана ответить быстро даже тогда, когда зависимость зависла. Простой `try/except` вокруг `check()` этого не гарантирует: если драйвер базы заблокировался на минуту, эндпоинт будет висеть вместе с ним. Отдельный поток позволяет основному обработчику перестать ждать по таймауту и вернуть `503`. Ловим `Exception` целиком, потому что любая ошибка проверки означает «не готов»; при этом не пробрасываем её дальше, иначе FastAPI вернёт 500 вместо аккуратного 503. `cancel_futures=True` отменяет ещё не запущенные задачи, но уже работающий поток остановить нельзя — это ограничение Python, и его полезно проговорить на собеседовании. В проде вместо потока часто используют асинхронный `asyncio.wait_for`, если чекер асинхронный.
+
+### Разбор 7
+Решение (`startup_app.py`):
+
+```python
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+def create_app(startup_ready: bool = False) -> FastAPI:
+    app = FastAPI()
+    state = {"ready": startup_ready}
+
+    @app.get("/healthz")
+    def healthz():
+        return {"status": "ok"}
+
+    @app.get("/startupz")
+    def startupz():
+        if not state["ready"]:
+            return JSONResponse({"status": "starting"}, status_code=503)
+        return {"status": "started"}
+
+    @app.get("/readyz")
+    def readyz():
+        if not state["ready"]:
+            return JSONResponse(
+                {"status": "unavailable", "component": "startup"}, status_code=503
+            )
+        return {"status": "ok"}
+
+    @app.post("/internal/startup-complete")
+    def startup_complete():
+        state["ready"] = True
+        return {"status": "ok"}
+
+    return app
+```
+
+Тест (`test_startup.py`):
+
+```python
+from fastapi.testclient import TestClient
+from startup_app import create_app
+
+def test_startup_gate():
+    client = TestClient(create_app(startup_ready=False))
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/startupz").status_code == 503
+    assert client.get("/readyz").status_code == 503
+
+    assert client.post("/internal/startup-complete").status_code == 200
+    assert client.get("/startupz").status_code == 200
+    assert client.get("/readyz").status_code == 200
+```
+
+Что здесь происходит? Startup-проверка нужна приложениям с долгим прогревом: загрузка модели, заполнение кеша, миграции. Пока прогрев идёт, `healthz` уже отвечает 200 — процесс жив, и перезапускать его бессмысленно; `startupz` сигнализирует «ещё не готов», а `readyz` не пускает трафик. Флаг хранится в замыкании фабрики, поэтому каждый тест получает независимый экземпляр состояния — это важнее, чем кажется: глобальная переменная сделала бы тесты зависимыми от порядка запуска. В реальном приложении `startup-complete` заменяется на завершение фоновой задачи, а сама проверка остаётся такой же простой.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -380,4 +517,31 @@ SLO — цель, от которой считаются burn rate и алерт
 - Она отключает алерт
 * Правильный ответ: Она выделяет метрики конкретного сервиса среди всех собираемых
 Без job алерт сработал бы по любому экземпляру.
+Зачем нужна startup-проверка?
+- Дать приложению время прогреться, не перезапуская его раньше срока
+- Заменить readiness
+- Ускорить обработку запросов
+* Правильный ответ: Дать приложению время прогреться, не перезапуская его раньше срока
+Пока startup не пройдена, liveness-рестарты не должны мешать прогреву.
+
+Почему у проверки зависимости обязателен таймаут?
+- Иначе зависший вызов заблокирует ответ readiness
+- Иначе база данных перезагрузится
+- Иначе Prometheus не соберёт метрики
+* Правильный ответ: Иначе зависший вызов заблокирует ответ readiness
+Проверка должна отвечать за секунды, даже если зависимость не отвечает вовсе.
+
+Что такое burn rate в контексте SLO?
+- Скорость расходования бюджета ошибок
+- Количество подов
+- Время до следующего деплоя
+* Правильный ответ: Скорость расходования бюджета ошибок
+Burn rate показывает, во сколько раз быстрее нормы тратится допустимая доля ошибок.
+
+Чем 503 отличается от 500 в контексте readiness?
+- 503 означает временную недоступность, 500 — внутреннюю ошибку
+- Ничем, это синонимы
+- 503 возвращается только при деплое
+* Правильный ответ: 503 означает временную недоступность, 500 — внутреннюю ошибку
+Балансировщик понимает 503 как «убери поду из ротации», а 500 — как баг приложения.
 <!--/QUIZ-->

@@ -105,6 +105,18 @@ async def collect(ids):
 
 Тест проверяет, что порядок результатов совпадает с порядком `ids` — это контракт `gather`.
 
+```mermaid
+flowchart LR
+    A["async-код"] --> B{"Тест async?"}
+    B -->|"да"| C["@pytest.mark.asyncio"]
+    B -->|"нет"| D["asyncio.run()"]
+    C --> E["await вызова"]
+    D --> E
+    E --> F{"Зависимость async?"}
+    F -->|"да"| G["AsyncMock"]
+    F -->|"нет"| H["MagicMock"]
+```
+
 ## Итог
 
 Для асинхронных тестов нужен `pytest-asyncio` с маркером `@pytest.mark.asyncio`, для подмены асинхронных зависимостей — `AsyncMock`, а для проверки таймаутов — `asyncio.timeout`.
@@ -126,6 +138,11 @@ async def collect(ids):
 
 ### Задача 5
 Напиши async-функцию `fetch_all(ids)`, которая собирает результаты через `asyncio.gather(*(fetch(i) for i in ids))`, где `fetch(i)` — это `async` функция, возвращающая `f"data-{i}"`. Напиши тест: передай `[1, 2, 3]` и проверь, что результат равен `["data-1", "data-2", "data-3"]` — порядок сохраняется. Запусти — `5 passed`.
+### Задача 6
+Напиши асинхронную фикстуру `api_client`, которая создаёт `AsyncMock`, настраивает `client.get.return_value = {"status": "ok"}`, отдаёт клиент через `yield`, а после теста выставляет `client.closed = True`. Тест `test_ping` с маркером `@pytest.mark.asyncio` принимает фикстуру, делает `await api_client.get("/ping")` и проверяет результат, а также `assert_awaited_once_with("/ping")`. Запусти pytest — ожидаемый вывод `1 passed`; убедись, что очистка выполняется даже при падении теста.
+
+### Задача 7
+Напиши async-функцию `fetch_safe(ids)`, которая параллельно вызывает `fetch(i)` и собирает результаты через `asyncio.gather(..., return_exceptions=True)`. Функция `fetch(i)` возвращает `f"data-{i}"`, но для `i == 2` бросает `ValueError("bad id")`. Напиши тест с `@pytest.mark.asyncio`: для `[1, 2, 3]` результат должен содержать `"data-1"`, объект `ValueError` и `"data-3"` — проверь типы элементов и то, что остальные значения не потерялись. Запусти pytest — ожидаемый вывод `1 passed`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -143,6 +160,11 @@ async def collect(ids):
 
 ### Подсказка 5
 `fetch` — вспомогательная async-функция: `async def fetch(i): return f"data-{i}"`. `asyncio.gather(*(fetch(i) for i in ids))` принимает корутины через распаковку `*`. В тесте сравни `asyncio.run(fetch_all([1, 2, 3]))` с `["data-1", "data-2", "data-3"]`.
+### Подсказка 6
+Фикстура объявляется как `async def` с `@pytest.fixture`. Внутри: `client = AsyncMock()`, `client.get.return_value = {"status": "ok"}`, `yield client`, `client.closed = True`. Фикстура и тест должны быть async — иначе `yield` в асинхронной функции не сработает как ожидание. У `AsyncMock` есть проверка `assert_awaited_once_with(...)`.
+
+### Подсказка 7
+`asyncio.gather(*(fetch(i) for i in ids), return_exceptions=True)` — флаг передаётся именованным аргументом после распаковки. При `return_exceptions=True` исключение попадает в результат как объект, а не выбрасывается наружу. Сравнивать исключения по значению не стоит — проверь `isinstance(result[1], ValueError)`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -256,6 +278,61 @@ async def test_fetch_all():
 Запуск: `python -m pytest`. Результат: `5 passed`.
 
 Что здесь происходит? `asyncio.gather` принимает корутины и запускает их параллельно. Распаковка `*(fetch(i) for i in ids)` превращает генератор в отдельные аргументы. Важное свойство `gather`: результаты собираются в том же порядке, в котором были переданы корутины, — независимо от того, какая завершилась первой. Тест проверяет именно этот контракт: список `["data-1", "data-2", "data-3"]` соответствует порядку `ids`. Если бы ты написал свою версию параллельной обработки, такое свойство поймало бы ошибку с порядком.
+### Разбор 6
+Решение:
+
+```python
+import pytest
+from unittest.mock import AsyncMock
+
+@pytest.fixture
+async def api_client():
+    client = AsyncMock()
+    client.get.return_value = {"status": "ok"}
+    yield client
+    client.closed = True
+
+@pytest.mark.asyncio
+async def test_ping(api_client):
+    result = await api_client.get("/ping")
+    assert result == {"status": "ok"}
+    api_client.get.assert_awaited_once_with("/ping")
+    assert api_client.closed is False
+```
+
+Запуск: `python -m pytest`. Результат: `1 passed`.
+
+Что здесь происходит? Асинхронная фикстура устроена как обычная yield-фикстура, но её тело выполняется в событийном цикле: pytest-asyncio дожидается настройки перед тестом и очистки после. В настройке создаётся `AsyncMock` с заранее заданным ответом — реальный HTTP-клиент не нужен. Тест проверяет и результат, и сам факт `await`: `assert_awaited_once_with` удостоверяет, что корутину действительно дождались ровно один раз с нужным путём. Строка `assert api_client.closed is False` стоит внутри теста, то есть до очистки, — после `yield` фикстура выставит `closed = True`, и это уже не увидит ни один assert. Очистка выполнится даже при падении теста — то же преимущество yield-фикстур, что и в синхронном pytest.
+
+### Разбор 7
+Решение:
+
+```python
+import asyncio
+import pytest
+
+async def fetch(i):
+    if i == 2:
+        raise ValueError("bad id")
+    return f"data-{i}"
+
+async def fetch_safe(ids):
+    return await asyncio.gather(
+        *(fetch(i) for i in ids), return_exceptions=True)
+
+@pytest.mark.asyncio
+async def test_fetch_safe():
+    result = await fetch_safe([1, 2, 3])
+    assert len(result) == 3
+    assert result[0] == "data-1"
+    assert isinstance(result[1], ValueError)
+    assert str(result[1]) == "bad id"
+    assert result[2] == "data-3"
+```
+
+Запуск: `python -m pytest`. Результат: `1 passed`.
+
+Что здесь происходит? Без флага `return_exceptions` первый же `ValueError` отменил бы `gather`, и два других результата потерялись бы. С флагом `True` каждая корутина завершается независимо: успешные значения возвращаются как обычно, а исключение — как объект в соответствующей позиции списка. Поэтому длина результата всегда равна длине `ids`, и порядок сохраняется. Тест проверяет три вещи: что ошибка не прервала остальные запросы, что на её месте именно `ValueError` с нужным сообщением, и что соседние значения уцелели. Такой шаблон полезен для массовых операций, где один сбойный элемент не должен ронять всю пачку, — например, при синхронизации списка товаров с внешним сервисом.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -314,4 +391,31 @@ await можно использовать только внутри функци
 - Проверить код возврата
 * Правильный ответ: Обернуть вызов в with pytest.raises(...)
 pytest.raises перехватывает исключение и считает тест успешным, только если оно возникло.
+Что проверяет assert_awaited_once_with("/ping") у AsyncMock?
+- Что корутину дождались ровно один раз с аргументом "/ping"
+- Что метод вернул строку "/ping"
+- Что мок создан с аргументом "/ping"
+* Правильный ответ: Что корутину дождались ровно один раз с аргументом "/ping"
+Проверка учитывает именно await-вызовы, а не обычные обращения.
+
+Что делает return_exceptions=True в asyncio.gather?
+- Возвращает исключения как элементы результата, не прерывая остальные корутины
+- Пробрасывает первое исключение наружу
+- Игнорирует все исключения
+* Правильный ответ: Возвращает исключения как элементы результата, не прерывая остальные корутины
+Список результатов сохраняет длину и порядок исходных корутин.
+
+Зачем указывать loop_scope="session" в маркере asyncio?
+- Чтобы все тесты сессии работали в одном событийном цикле
+- Чтобы тесты выполнялись параллельно
+- Чтобы отключить таймауты
+* Правильный ответ: Чтобы все тесты сессии работали в одном событийном цикле
+Это удобно для тяжёлых фикстур, созданных один раз на сессию.
+
+Что произойдёт, если забыть await перед вызовом корутины?
+- Вернётся объект coroutine, а код внутри не выполнится
+- Функция выполнится синхронно
+- Возникнет NameError
+* Правильный ответ: Вернётся объект coroutine, а код внутри не выполнится
+Python лишь создаст корутину; для запуска нужен await или asyncio.run.
 <!--/QUIZ-->

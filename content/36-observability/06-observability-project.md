@@ -63,6 +63,22 @@ Middleware-цепочка в `main.py` — по одному middleware на к�
 
 Тесты не трогают сеть: `InMemorySpanExporter` вместо OTLP, `CollectingTransport` для Sentry, `DummyChecker` для readiness. Это позволяет запускать `pytest` в CI без внешних сервисов — и именно так проверяется «наблюдаемое» приложение.
 
+## Поток запроса через слои наблюдаемости
+
+В готовом сервисе каждый запрос проходит через несколько независимых слоёв. Важно, чтобы они не дублировали работу и были связаны общим идентификатором:
+
+```mermaid
+flowchart LR
+    A["Запрос"] --> B["CorrelationId"]
+    B --> C["Метрики"]
+    C --> D["Трейс"]
+    D --> E["Обработчик"]
+    E --> F["JSON-логи"]
+    E --> G["Sentry при ошибке"]
+```
+
+`correlation_id` связывает логи между собой, `trace_id` — логи с трейсом, а метрики дают агрегаты по тем же запросам. Именно поэтому в проекте порядок middleware и фильтров так важен.
+
 ## Лучшие практики
 
 - **Один сигнал — один модуль**: логи, трейсы, метрики и ошибки не должны быть перемешаны в коде приложения.
@@ -85,6 +101,11 @@ Middleware-цепочка в `main.py` — по одному middleware на к�
 
 ### Задача 5
 Добавь в `app/sentry_setup.py` функцию `init_sentry()` (SENTRY_DSN из config, `before_send=mask_secrets` из урока 4, `transport=None` для тестов) и подключи её в `main.py`. Напиши финальный тест: `CollectingTransport` (из урока 4), запрос к `/orders`, проверь, что транспорт пуст (ошибок нет), а затем `GET /orders?fail=1` (добавь эндпоинт, который бросает `RuntimeError`) — проверь, что `transport.events` содержит событие с `exception`. Запусти всю серию `pytest tests/ -v` и убедись, что все тесты проходят без сети.
+### Задача 6
+Свяжи логи с трейсами. Добавь в `app/logging_setup.py` фильтр `TraceContextFilter`, который берёт `trace.get_current_span().get_span_context()` и, если `span_context.is_valid`, кладёт в запись `trace_id` и `span_id` в hex-виде (`format(span_context.trace_id, "032x")`, `format(span_context.span_id, "016x")`), иначе ставит `"-"`. Подключи фильтр к обработчику вместе с `CorrelationIdFilter`. В `tests/test_trace_logs.py` настрой `InMemorySpanExporter`, открой спан `"checkout"`, внутри него залогируй событие и проверь, что `record["trace_id"]` совпадает с `format(span.get_span_context().trace_id, "032x")`, а вне спана поле равно `"-"`. Ожидаемый вывод: `1 passed`, в каждой строке лога есть `trace_id`.
+
+### Задача 7
+Собери отчёт SLO из exposition-текста. В `app/slo.py` напиши функции `sum_counter(text: str, name: str) -> float`, которая суммирует значения всех серий указанного счётчика (игнорируя `# HELP` и `# TYPE`), и `error_ratio(text: str, threshold: float = 0.05) -> dict`, возвращающую `{"requests": ..., "errors": ..., "ratio": ..., "burning": bool}`. Считай `requests` по `http_requests_total`, `errors` — по `http_errors_total`; если запросов ноль, `ratio` равен 0.0. В `tests/test_slo.py` подай текст с двумя сериями запросов (`5.0` и `3.0`) и одной серией ошибок (`0.4`) и проверь `ratio == 0.05` и `burning is False`, а затем текст с `0.5` ошибок — `burning is True`. Ожидаемый вывод: `2 passed`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -102,6 +123,11 @@ Middleware: `@app.middleware("http")`; `request.headers.get("X-Request-ID") or u
 
 ### Подсказка 5
 `CollectingTransport` определи в `tests/conftest.py` или прямо в тесте. `init_sentry` должна принимать `transport=None`, чтобы тест подставил `CollectingTransport()`. Для `/orders?fail=1` — `raise RuntimeError("boom")` в обработчике; `TestClient` вернёт 500, а Sentry поймает исключение автоматически. Не забудь в тесте вызвать `init_sentry(..., transport=transport)` **до** создания `TestClient`.
+### Подсказка 6
+Импорт: `from opentelemetry import trace`. Валидный контекст — это `span_context.is_valid`, а не проверка на `None`: у «пустого» спана контекст существует, но невалиден. Форматируй идентификаторы с ведущими нулями через `format(..., "032x")` и `format(..., "016x")` — иначе строки будут разной длины и не совпадут с ожиданием. Фильтр должен возвращать `True` всегда, иначе запись пропадёт.
+
+### Подсказка 7
+Разбирай строки построчно: пропускай пустые и начинающиеся с `#`, затем отделяй имя метрики от значения через `rsplit(" ", 1)`. Имя серии может содержать метки в фигурных скобках — сравнивай часть до `{`. Суммируй все серии, чтобы получить общий итог по всем статусам и методам; `ratio` считай как `errors / requests`, а `burning` — как `ratio > threshold`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -385,6 +411,125 @@ def test_error_captured():
 ```
 
 Что здесь происходит? Успешный запрос не порождает событий. Ошибочный — автоматически захватывается ASGI-интеграцией и попадает в `CollectingTransport`. Тесты полностью автономны: ни один из них не ходит в сеть, а значит, `pytest tests/ -v` проходит в CI без внешних сервисов. Это и есть финальная проверка «наблюдаемого» приложения.
+### Разбор 6
+Решение (`app/logging_setup.py`, фрагмент):
+
+```python
+import logging
+
+from opentelemetry import trace
+
+class TraceContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            record.trace_id = format(span_context.trace_id, "032x")
+            record.span_id = format(span_context.span_id, "016x")
+        else:
+            record.trace_id = "-"
+            record.span_id = "-"
+        return True
+
+# при настройке handler:
+# handler.addFilter(CorrelationIdFilter())
+# handler.addFilter(TraceContextFilter())
+```
+
+Тест (`tests/test_trace_logs.py`):
+
+```python
+import io
+import json
+import logging
+
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from app.logging_setup import TraceContextFilter
+
+def test_trace_id_in_logs():
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(trace_id)s"))
+    handler.addFilter(TraceContextFilter())
+    logger = logging.getLogger("trace-test")
+    logger.handlers = [handler]
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    with tracer.start_as_current_span("checkout") as span:
+        expected = format(span.get_span_context().trace_id, "032x")
+        logger.info("inside span")
+
+    logger.info("outside span")
+    lines = stream.getvalue().strip().splitlines()
+    assert lines[0] == expected
+    assert lines[1] == "-"
+```
+
+Что здесь происходит? Логи и трейсы — разные сигналы, но без общей связи они бесполезны: вы видите медленный спан, но не знаете, какие записи к нему относятся. `TraceContextFilter` берёт текущий спан из контекста OTel (тот же `contextvars`-механизм, что и у correlation id) и добавляет два поля в каждую запись. `is_valid` — правильная проверка: у неактивного спана `trace_id` равен нулю, и без неё в логах появились бы «нулевые» идентификаторы, которые никуда не ведут. Форматирование в hex с фиксированной шириной совпадает с тем, что показывает Jaeger или Tempo, поэтому идентификатор можно просто скопировать из лога в поиск по трейсам. В проде такой фильтр ставится на тот же handler, что и JSON-форматтер, и не добавляет заметных накладных расходов.
+
+### Разбор 7
+Решение (`app/slo.py`):
+
+```python
+def sum_counter(text: str, name: str) -> float:
+    total = 0.0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        series, _, raw_value = line.rpartition(" ")
+        metric_name = series.split("{", 1)[0]
+        if metric_name == name:
+            total += float(raw_value)
+    return total
+
+def error_ratio(text: str, threshold: float = 0.05) -> dict:
+    requests = sum_counter(text, "http_requests_total")
+    errors = sum_counter(text, "http_errors_total")
+    ratio = errors / requests if requests else 0.0
+    return {
+        "requests": requests,
+        "errors": errors,
+        "ratio": ratio,
+        "burning": ratio > threshold,
+    }
+```
+
+Тест (`tests/test_slo.py`):
+
+```python
+from app.slo import error_ratio
+
+SAMPLE = """
+# HELP http_requests_total Total requests
+# TYPE http_requests_total counter
+http_requests_total{method="GET",status="200"} 5.0
+http_requests_total{method="GET",status="500"} 3.0
+http_errors_total{status="500"} 0.4
+"""
+
+def test_ratio_at_threshold():
+    report = error_ratio(SAMPLE)
+    assert report["requests"] == 8.0
+    assert report["errors"] == 0.4
+    assert report["ratio"] == 0.05
+    assert report["burning"] is False
+
+def test_ratio_above_threshold():
+    text = SAMPLE.replace("0.4", "0.5")
+    assert error_ratio(text)["burning"] is True
+```
+
+Что здесь происходит? Exposition-формат — обычный текст, поэтому отчёт SLO можно построить без Prometheus и без сети, например в CI после нагрузочного теста. `sum_counter` суммирует все серии с данным именем: нас интересует общая доля ошибок, а не отдельная комбинация меток. `rpartition(" ")` отделяет значение справа, а `split("{", 1)[0]` отрезает метки от имени — так один и тот же код работает и для `http_requests_total 10.0`, и для серии с метками. Проверка `requests == 0` защищает от деления на ноль в момент старта, когда счётчиков ещё нет. Порог `0.05` — это те же 5%, что в правиле алерта из урока 5: расчёт и алерт должны использовать одну формулу, иначе дашборд и тревога будут расходиться.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -457,4 +602,31 @@ Prometheus опрашивает /metrics в exposition format.
 - Чтобы уменьшить число файлов
 * Правильный ответ: Чтобы можно было менять и отлаживать каждый сигнал независимо
 Разделение ответственности упрощает сопровождение.
+Зачем добавлять trace_id в JSON-логи?
+- Чтобы связать запись лога с конкретным трейсом
+- Чтобы уменьшить размер логов
+- Чтобы заменить correlation_id
+* Правильный ответ: Чтобы связать запись лога с конкретным трейсом
+Идентификатор можно скопировать в Jaeger или Tempo и увидеть весь путь запроса.
+
+Как проверить, что текущий спан активен?
+- span_context.is_valid
+- span is None
+- trace_id == 0
+* Правильный ответ: span_context.is_valid
+У неактивного спана контекст существует, но невалиден.
+
+Зачем валидировать конфигурацию на старте?
+- Чтобы приложение упало сразу с понятной ошибкой, а не в первом запросе
+- Чтобы ускорить импорт модулей
+- Чтобы отключить логирование
+* Правильный ответ: Чтобы приложение упало сразу с понятной ошибкой, а не в первом запросе
+Fail-fast экономит время на диагностику в проде.
+
+Почему отчёт SLO считает сумму всех серий http_requests_total?
+- Нас интересует общая доля ошибок по сервису, а не по отдельной метке
+- Так быстрее работает Python
+- Иначе Prometheus не соберёт метрики
+* Правильный ответ: Нас интересует общая доля ошибок по сервису, а не по отдельной метке
+Суммирование по сериям даёт корректный знаменатель для ratio.
 <!--/QUIZ-->

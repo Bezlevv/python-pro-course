@@ -128,6 +128,24 @@ async def metrics_middleware(request: Request, call_next):
 
 `Request.method` — метод запроса, `response.status_code` — код ответа. Так мы получаем метрики `http_requests_total{method="GET",status="200"}` и `http_request_duration_seconds`.
 
+## Как устроен сбор метрик
+
+Приложение не «пушит» метрики — Prometheus сам приходит за ними по расписанию. Схема показывает весь путь от счётчика в коде до графика в Grafana:
+
+```mermaid
+sequenceDiagram
+    participant P as "Prometheus"
+    participant A as "Приложение"
+    participant G as "Grafana"
+    P->>A: "GET /metrics каждые 15 с"
+    A-->>P: "exposition format"
+    P->>P: "сохраняет в TSDB"
+    G->>P: "запрос на PromQL"
+    P-->>G: "ряд значений"
+```
+
+Важное следствие: метрики в приложении — это просто текущие значения в памяти. Если процесс перезапустился, `Counter` начинается с нуля, и Prometheus корректно обработает сброс благодаря функции `rate()`.
+
 ## Лучшие практики
 
 - **Следи за кардинальностью меток.** Метки должны иметь ограниченное число значений: `method`, `status` — можно, а вот `user_id` или конкретный `path` с id (например, `/orders/12345`) — нельзя: количество серий метрик взорвётся. Для маршрутов используй шаблон пути `/orders/{order_id}`.
@@ -150,6 +168,11 @@ async def metrics_middleware(request: Request, call_next):
 
 ### Задача 5
 Реализуй middleware, который логирует «необычные» ответы: если `response.status_code >= 400`, увеличь счётчик `http_errors_total` с меткой `status`. Покажи, как в `/metrics` будет выглядеть строка для 404. Затем напиши краткий комментарий в коде о том, почему метку `path` с конкретным id ставить нельзя, а метку `path` с шаблоном — можно.
+### Задача 6
+Собери метрики в изолированном реестре, чтобы тесты не конфликтовали с глобальным `REGISTRY`. Создай `metrics.py` с функцией `build_registry()`, которая возвращает кортеж `(registry, requests, inflight, duration)`: `CollectorRegistry()`, `Counter("http_requests_total", ..., ["method", "status"], registry=registry)`, `Gauge("http_inflight_requests", ..., registry=registry)` и `Histogram("http_request_duration_seconds", ..., buckets=(0.05, 0.1, 0.5, 1.0), registry=registry)`. В `test_metrics.py` увеличь счётчик на 3, поставь gauge в 1 и сделай `duration.observe(0.08)`, затем проверь, что `generate_latest(registry).decode()` содержит строки `http_requests_total{method="GET",status="200"} 3.0`, `http_inflight_requests 1.0` и `http_request_duration_seconds_count 1.0`. Ожидаемый вывод: `2 passed`.
+
+### Задача 7
+Инструментируй FastAPI собственным реестром. В `app_metrics.py` создай `CollectorRegistry`, `Counter` с метками `method` и `status`, `Histogram` с меткой `route` и middleware, который замеряет время через `time.perf_counter()`, в `finally` делает `observe`, а статус считает после `call_next`. В качестве значения метки `route` бери шаблон пути из `request.scope["route"].path`, а не сырой URL — иначе cardinality взорвётся. Эндпоинт `/metrics` должен отдавать `Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)`. В `test_app_metrics.py` через `TestClient` вызови `/ping`, затем `/metrics` и проверь наличие серий `http_requests_total{method="GET",status="200"} 1.0` и `http_request_duration_seconds_count{route="/ping"} 1.0`. Ожидаемый вывод: `1 passed`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -167,6 +190,11 @@ Gauge: `INFLIGHT = Gauge("http_inflight_requests", "Requests currently being pro
 
 ### Подсказка 5
 Счётчик ошибок: `HTTP_ERRORS = Counter("http_errors_total", "Total error responses", ["status"])`. В middleware: `if response.status_code >= 400: HTTP_ERRORS.labels(status=str(response.status_code)).inc()`. Для проверки 404 сделай запрос к несуществующему пути `/nope`. Комментарий: имя метрики должно иметь ограниченное число значений — `/orders/12345` создаёт новую серию на каждый id.
+### Подсказка 6
+Главное — передать `registry=registry` в каждый конструктор метрики, иначе они попадут в глобальный реестр и повторный вызов `build_registry()` в другом тесте упадёт с `ValueError: Duplicated timeseries`. `generate_latest` возвращает `bytes`, поэтому для проверки подстроки нужен `.decode("utf-8")`. Гистограмма всегда публикует три серии: `_bucket`, `_sum` и `_count`; для проверки достаточно `_count`.
+
+### Подсказка 7
+В middleware шаблон маршрута доступен только после `await call_next(request)`: `route = request.scope.get("route")`, затем `getattr(route, "path", request.url.path)`. Метку `status` бери как `str(response.status_code)`. Не добавляй `route` в метки счётчика запросов и не используй `request.url.path` — на `/orders/12345` каждая значение создаст новую серию.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -300,6 +328,124 @@ async def metrics_middleware(request: Request, call_next):
 ```
 
 В `/metrics` появится строка `http_errors_total{status="404"} 1.0` после запроса к несуществующему пути. Что здесь происходит? Мы отделяем ошибки в отдельную метрику, чтобы было удобно строить алерты на долю 5xx. Комментарий про кардинальность: если написать `labels(method=..., path=request.url.path)`, то запрос к `/orders/12345` и к `/orders/67890` создадут **разные серии** метрик — уже через день их наберутся тысячи, и Prometheus начнёт тормозить и тратить память. Поэтому в метки кладут только ограниченные значения: метод, статус, шаблон пути (`/orders/{order_id}`).
+### Разбор 6
+Решение (`metrics.py`):
+
+```python
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
+
+def build_registry():
+    registry = CollectorRegistry()
+    requests = Counter(
+        "http_requests_total", "Total HTTP requests", ["method", "status"], registry=registry
+    )
+    inflight = Gauge("http_inflight_requests", "In-flight requests", registry=registry)
+    duration = Histogram(
+        "http_request_duration_seconds",
+        "Request duration in seconds",
+        buckets=(0.05, 0.1, 0.5, 1.0),
+        registry=registry,
+    )
+    return registry, requests, inflight, duration
+```
+
+Тест (`test_metrics.py`):
+
+```python
+from prometheus_client import generate_latest
+from prometheus_client.parser import text_string_to_metric_families
+
+from metrics import build_registry
+
+def test_exposition_contains_series():
+    registry, requests, inflight, duration = build_registry()
+    requests.labels(method="GET", status="200").inc(3)
+    inflight.inc()
+    duration.observe(0.08)
+
+    text = generate_latest(registry).decode("utf-8")
+    assert 'http_requests_total{method="GET",status="200"} 3.0' in text
+    assert "http_inflight_requests 1.0" in text
+    assert "http_request_duration_seconds_count 1.0" in text
+
+def test_parser_reads_labels():
+    registry, requests, _, _ = build_registry()
+    requests.labels(method="POST", status="500").inc()
+
+    text = generate_latest(registry).decode("utf-8")
+    families = {family.name: family for family in text_string_to_metric_families(text)}
+    samples = {
+        tuple(sorted(sample.labels.items())): sample.value
+        for sample in families["http_requests"].samples
+        if sample.name == "http_requests_total"
+    }
+    assert samples[(('method', 'POST'), ('status', '500'))] == 1.0
+```
+
+Что здесь происходит? `CollectorRegistry` — это отдельный «склад» метрик. Глобальный `REGISTRY` удобен в приложении, но в тестах он превращается в ловушку: второй импорт модуля или повторный вызов фабрики пытается зарегистрировать то же имя и падает. Свой реестр решает проблему и позволяет проверить ровно те метрики, которые создал тест. Формат exposition — обычный текст, поэтому самые надёжные проверки — подстроки; а `text_string_to_metric_families` даёт структурный разбор, когда нужно сравнить значения по меткам. Помни, что `Counter` публикует имя с суффиксом `_total`, а `Histogram` — сразу несколько серий.
+
+### Разбор 7
+Решение (`app_metrics.py`):
+
+```python
+import time
+
+from fastapi import FastAPI, Request, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Histogram, generate_latest,
+)
+
+registry = CollectorRegistry()
+REQUESTS = Counter(
+    "http_requests_total", "Total HTTP requests", ["method", "status"], registry=registry
+)
+DURATION = Histogram(
+    "http_request_duration_seconds", "Request duration", ["route"], registry=registry
+)
+
+app = FastAPI()
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        REQUESTS.labels(method=request.method, status="500").inc()
+        raise
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        DURATION.labels(route=route_path).observe(time.perf_counter() - start)
+
+    REQUESTS.labels(method=request.method, status=str(response.status_code)).inc()
+    return response
+
+@app.get("/metrics")
+def metrics():
+    return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+```
+
+Тест (`test_app_metrics.py`):
+
+```python
+from fastapi.testclient import TestClient
+from app_metrics import app
+
+def test_ping_is_counted():
+    client = TestClient(app)
+    assert client.get("/ping").status_code == 200
+
+    body = client.get("/metrics").text
+    assert 'http_requests_total{method="GET",status="200"} 1.0' in body
+    assert 'http_request_duration_seconds_count{route="/ping"} 1.0' in body
+```
+
+Что здесь происходит? Middleware оборачивает каждый запрос: до `call_next` фиксируется стартовое время, после — наблюдение в гистограмму и инкремент счётчика. Ветка `except` важна отдельно: без неё запрос, упавший с исключением, не попадёт в счётчик, и график ошибок будет занижен. `finally` гарантирует, что длительность запишется при любом исходе — иначе гистограмма потеряет самые интересные, медленные запросы. Шаблон маршрута берётся из `request.scope["route"]`: FastAPI кладёт туда объект `APIRoute`, у которого `.path` равен `/orders/{order_id}`, а не конкретному `/orders/42`. Это и есть соблюдение правила о кардинальности. Эндпоинт `/metrics` отдаёт реестр в формате exposition и правильным `Content-Type`, поэтому Prometheus сможет его спарсить без дополнительных настроек.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -372,4 +518,31 @@ finally гарантирует уменьшение при любом исход
 - 42 ошибки
 * Правильный ответ: 42 запроса с меткой GET и статусом 200
 Серия метрик с метками method=GET, status=200 насчитала 42.0.
+Что происходит со значением Counter после перезапуска процесса?
+- Продолжает расти с прежнего значения
+- Начинается заново с нуля
+- Сохраняется в файле рядом
+* Правильный ответ: Начинается заново с нуля
+Counter живёт в памяти; Prometheus распознаёт сброс и корректно считает rate().
+
+Чем Summary отличается от Histogram?
+- Summary считает перцентили на стороне приложения, Histogram — в Prometheus по бакетам
+- Summary не поддерживает метки
+- Histogram может только уменьшаться
+* Правильный ответ: Summary считает перцентили на стороне приложения, Histogram — в Prometheus по бакетам
+Поэтому Summary нельзя агрегировать между инстансами, а Histogram можно.
+
+Что будет при повторной регистрации метрики с тем же именем в одном реестре?
+- Значения сложатся
+- ValueError: Duplicated timeseries
+- Старая метрика заменится
+* Правильный ответ: ValueError: Duplicated timeseries
+Реестр требует уникальных имён; в тестах для этого используют отдельный CollectorRegistry.
+
+Зачем нужен режим prometheus_multiproc_dir?
+- Чтобы несколько процессов писали метрики в общий набор
+- Чтобы ускорить сборку метрик
+- Чтобы отключить гистограммы
+* Правильный ответ: Чтобы несколько процессов писали метрики в общий набор
+При нескольких воркерах у каждого свой реестр, и без MultiProcessCollector данные будут неполными.
 <!--/QUIZ-->

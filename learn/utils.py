@@ -1,6 +1,8 @@
 """Утилиты: парсинг уроков и рендер Markdown."""
 
 import re
+from html import escape as html_escape
+
 from markdown import markdown as md_to_html
 
 # --- Парсинг Markdown-файла урока ---
@@ -167,11 +169,36 @@ def parse_quiz(text):
 
 MD_EXTENSIONS = ['fenced_code', 'tables', 'sane_lists', 'nl2br']
 
+MERMAID_RE = re.compile(r'```mermaid\s*\n(.*?)```', re.S)
+
+
+def has_mermaid(*texts):
+    """Есть ли в текстах схемы Mermaid."""
+    return any(t and MERMAID_RE.search(t) for t in texts)
+
 
 def render_markdown(text):
     if not text:
         return ''
-    return md_to_html(text, extensions=MD_EXTENSIONS)
+    diagrams = []
+
+    def _stash(match):
+        diagrams.append(match.group(1))
+        return f'\n\nMERMAIDPLACEHOLDER{len(diagrams) - 1}\n\n'
+
+    prepared = MERMAID_RE.sub(_stash, text)
+    html = md_to_html(prepared, extensions=MD_EXTENSIONS)
+
+    for idx, code in enumerate(diagrams):
+        safe = html_escape(code.strip())
+        block = f'<div class="mermaid">{safe}</div>'
+        # placeholder мог попасть в <p>
+        html = re.sub(
+            rf'<p>\s*MERMAIDPLACEHOLDER{idx}\s*</p>',
+            block, html,
+        )
+        html = html.replace(f'MERMAIDPLACEHOLDER{idx}', block)
+    return html
 
 
 def lesson_difficulty_label(value):

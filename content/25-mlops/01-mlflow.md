@@ -101,6 +101,23 @@ model.fit(X_train, y_train)
 
 Один вызов — и каждый запуск сам пишет параметры, метрики, модель и даже пример данных. Идеально для быстрых экспериментов: ничего не забываешь.
 
+## Как устроен запуск: схема
+
+Схема показывает, куда попадают данные одного запуска и как они связаны с экспериментом и реестром:
+
+```mermaid
+flowchart LR
+    A["Запуск обучения"] --> B["params"]
+    A --> C["metrics"]
+    A --> D["artifacts"]
+    A --> E["tags"]
+    B --> F["Эксперимент"]
+    C --> F
+    D --> F
+    E --> F
+    F --> G["Model Registry"]
+```
+
 ## Итог
 
 MLflow Tracking даёт тебе воспроизводимость: запустил эксперимент — вся информация о нём в одном месте, сравниваемая и доступная команде. В следующем уроке мы научимся выносить модели за пределы Python-фреймворков с помощью ONNX.
@@ -120,6 +137,12 @@ MLflow Tracking даёт тебе воспроизводимость: запус
 
 ### Задача 5
 Используя данные из задачи 1 (или повторив обучение), напиши код, который через `mlflow.search_runs` находит лучший run по метрике `r2` и печатает его `run_id` и параметры в виде словаря (ключ `params.alpha`, значение — число). Используй сортировку `sort_values("metrics.r2", ascending=False)` и `.iloc[0]`. Ожидаемый результат: выведен `run_id` и `alpha` лучшего запуска — тот, что дал максимальный r2.
+### Задача 6
+Создай эксперимент `diabetes-tags` и обучи две модели `Ridge` — с `alpha=0.5` и `alpha=5.0` — на `load_diabetes`. В каждом запуске задай `run_name` и тег через `mlflow.set_tag("stage", ...)`: первому — `baseline`, второму — `candidate`; параметр `alpha` и метрику `r2` логируй как обычно. После цикла вызови `mlflow.search_runs(experiment_names=["diabetes-tags"], filter_string="tags.stage = 'candidate'")` и напечатай число строк и `run_id` найденного запуска. Ожидаемый результат: одна строка и один `run_id`, при этом в эксперименте по-прежнему два запуска.
+
+### Задача 7
+Обучи `RandomForestRegressor(max_depth=4, random_state=42)` на `load_diabetes` и залогируй её внутри запуска через `mlflow.sklearn.log_model(model, artifact_path="model")`, сохранив `run.info.run_id` в переменную. После выхода из `with` загрузи модель обратно по URI `f"runs:/{run_id}/model"` через `mlflow.sklearn.load_model` и посчитай предсказания на `X_test`. Сравни их с предсказаниями исходного объекта и напечатай максимальную абсолютную разницу. Дополнительно выведи `type(loaded).__name__` — имя класса загруженного объекта должно совпадать с исходной моделью. Ожидаемый результат: разница равна 0.0 (допустимо меньше 1e-9) — сохранённая модель полностью воспроизводит предсказания.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -137,6 +160,11 @@ MLflow Tracking даёт тебе воспроизводимость: запус
 
 ### Подсказка 5
 Помни: `search_runs` возвращает DataFrame, значит можно использовать `df.sort_values("metrics.r2", ascending=False)`. Строка с best-раном — `.iloc[0]`. Преврати параметры в dict через `.to_dict()` или выбери нужную колонку напрямую.
+### Подсказка 6
+`mlflow.set_tag("stage", "baseline")` вызывай внутри `with mlflow.start_run():` — тег привяжется к текущему запуску. В `filter_string` синтаксис обращается к тегам как `tags.stage = 'candidate'`, кавычки вокруг значения обязательны. В полученном DataFrame колонка называется `tags.stage`, а число строк — `len(df)`.
+
+### Подсказка 7
+`run_id` бери внутри `with mlflow.start_run() as run:` — `run.info.run_id`. Путь `model` в URI тот же, что `artifact_path` в `log_model`. `load_model` вернёт обычный sklearn-объект с `.predict`, поэтому сравнение делается через `np.max(np.abs(pred_loaded - pred_original))`. И не забудь `set_tracking_uri` до запуска: иначе загрузка не найдёт артефакт.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -261,6 +289,66 @@ print("Параметры лучшего рана:", {"alpha": best["params.alph
 ```
 
 Разбор шагов. Тот же приём, что в задаче 1: `sort_values` по колонке `metrics.r2` в порядке убывания, затем `.iloc[0]` — первая строка. Из неё достаём `run_id` (уникальный идентификатор запуска) и параметры. Если бы запусков было сто, лучший находился бы точно так же — код не меняется. Обрати внимание: колонки DataFrame называются `params.alpha` и `metrics.r2`; если бы мы забыли залогировать `alpha`, тут было бы `NaN`. Именно поэтому важно логировать всё: постраничный анализ истории возвращает лишь то, что было записано. Такой подход — фундамент MLOps: любой эксперимент можно воспроизвести, сравнить и выбрать лучший по объективным числам.
+### Разбор 6
+Решение:
+
+```python
+import mlflow
+from sklearn.datasets import load_diabetes
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split
+
+X, y = load_diabetes(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+mlflow.set_tracking_uri("sqlite:///mlruns.db")
+mlflow.set_experiment("diabetes-tags")
+
+for alpha, stage in [(0.5, "baseline"), (5.0, "candidate")]:
+    with mlflow.start_run(run_name=f"ridge-{stage}"):
+        mlflow.set_tag("stage", stage)
+        mlflow.log_param("alpha", alpha)
+        model = Ridge(alpha=alpha).fit(X_train, y_train)
+        mlflow.log_metric("r2", model.score(X_test, y_test))
+
+candidates = mlflow.search_runs(
+    experiment_names=["diabetes-tags"],
+    filter_string="tags.stage = 'candidate'",
+)
+print("Строк:", len(candidates))
+print("run_id:", candidates.iloc[0]["run_id"])
+```
+
+Разбор шагов. Тег — это пара «ключ-значение», которую MLflow хранит рядом с параметрами и метриками, но не включает в сравнение чисел. Здесь тег `stage` играет роль бизнес-пометки: `baseline` — то, что уже в проде, `candidate` — претендент на выкатку. `filter_string` транслируется в SQL-подобное условие по хранилищу, поэтому фильтрация не требует выгружать всю историю в память: при тысячах запусков это принципиально. Обрати внимание, что `search_runs` вернул ровно одну строку, хотя в эксперименте два запуска — фильтр отработал по тегу, а не по имени. Такой приём позволяет размечать запуски по спринту, владельцу или гипотезе и затем поднимать нужный срез истории одной строкой кода.
+
+### Разбор 7
+Решение:
+
+```python
+import mlflow
+import numpy as np
+from sklearn.datasets import load_diabetes
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+X, y = load_diabetes(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+mlflow.set_tracking_uri("sqlite:///mlruns.db")
+
+with mlflow.start_run() as run:
+    model = RandomForestRegressor(max_depth=4, random_state=42).fit(X_train, y_train)
+    mlflow.sklearn.log_model(model, artifact_path="model")
+
+run_id = run.info.run_id
+loaded = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+
+diff = np.max(np.abs(loaded.predict(X_test) - model.predict(X_test)))
+print("run_id:", run_id)
+print("Макс. разница:", diff)
+```
+
+Разбор шагов. `log_model` сериализует модель в артефакт запуска и записывает метаданные: версии библиотек, сигнатуру входа, формат сериализации. URI `runs:/<run_id>/model` — это способ адресовать артефакт именно того запуска, а не «последнюю модель в папке». `load_model` читает метаданные, поднимает нужный flavor (sklearn) и возвращает объект, готовый к `.predict`. Разница 0.0 означает, что мы получили побайтово то же дерево решений, а не приблизительную копию — это и есть воспроизводимость в терминах MLOps. Практический смысл: обучив модель ночью, утром можно поднять ровно её версию для разбора инцидента, не переобучая заново и не надеясь на сохранённый локально файл.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -319,4 +407,32 @@ autolog берёт на себя весь ручной трекинг для skl
 - JSON-ответ сервера
 * Правильный ответ: DataFrame с историей запусков и их параметрами/метриками
 search_runs возвращает pandas DataFrame, где каждая строка — run, а колонки — его атрибуты.
+
+Зачем в MLflow нужны теги (tags)?
+- Для произвольных меток, по которым можно фильтровать и группировать запуски
+- Для хранения весов модели
+- Для ускорения обучения
+* Правильный ответ: Для произвольных меток, по которым можно фильтровать и группировать запуски
+Теги не участвуют в сравнении метрик, но дают бизнес-разметку: стадия, владелец, гипотеза.
+
+Что делает filter_string в mlflow.search_runs()?
+- Отбирает запуски по условию, например tags.stage = 'candidate'
+- Удаляет неудачные запуски
+- Переименовывает колонки таблицы
+* Правильный ответ: Отбирает запуски по условию, например tags.stage = 'candidate'
+Условие проверяется на стороне хранилища, поэтому в память попадают только нужные строки.
+
+Как загрузить модель, сохранённую в конкретном запуске?
+- mlflow.sklearn.load_model("runs:/<run_id>/model")
+- mlflow.load_model("model.pkl")
+- mlflow.ui()
+* Правильный ответ: mlflow.sklearn.load_model("runs:/<run_id>/model")
+URI runs:/ адресует артефакт именно этого запуска, а не последнюю модель в каталоге.
+
+Что произойдёт при повторном log_model с тем же registered_model_name?
+- В реестре появится новая версия модели
+- Вторая запись молча перезапишет первую
+- MLflow выбросит ошибку
+* Правильный ответ: В реестре появится новая версия модели
+Model Registry хранит историю версий: каждая регистрация добавляет v2, v3 и так далее.
 <!--/QUIZ-->

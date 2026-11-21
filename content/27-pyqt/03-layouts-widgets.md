@@ -179,6 +179,19 @@ value = spin.value()         # прочитать значение
 spin.valueChanged.connect(on_value_changed)   # сигнал
 ```
 
+## Схема: иерархия раскладок
+
+Сложный интерфейс — это дерево: окно, в нём основная раскладка, внутри неё — вложенные раскладки и виджеты.
+
+```mermaid
+flowchart TD
+    A["QWidget"] --> B["QVBoxLayout"]
+    B --> C["QHBoxLayout: подпись и поле"]
+    B --> D["QGridLayout: кнопки"]
+    B --> E["QFormLayout: форма"]
+    B --> F["addStretch: пружина"]
+```
+
 ## Итог урока
 
 - Layout-ы автоматически расставляют виджеты и не дают им «разъезжаться»;
@@ -204,6 +217,12 @@ spin.valueChanged.connect(on_value_changed)   # сигнал
 
 ### Задача 5
 Создай окно с `QTableWidget` 4×3. Заполни первые два столбца данными: имя и город (любые 4 строки). Третий столбец заполни числами 1–4 в виде строк. Задай заголовки столбцов: Имя, Город, Баллы. Подгони ширину столбцов под содержимое и сделай так, чтобы редактирование включалось только двойным кликом.
+
+### Задача 6
+Собери «заказ пиццы» на `QFormLayout`: выпадающий список `QComboBox` с размерами «Маленькая», «Средняя», «Большая» и числовое поле `QSpinBox` для количества от 1 до 10 с начальным значением 1. Ниже — ярлык с итоговой суммой. Цены задай словарём: 400, 550 и 700 рублей. Пересчитывай итог при любом изменении выбора или количества, подписавшись на `currentTextChanged` и `valueChanged`, и выводи его в формате `Итого: 1100 ₽`. Ожидаемый вывод: при размере «Средняя» и количестве 2 ярлык показывает `Итого: 1100 ₽`, а при смене на «Большая» — `Итого: 1400 ₽` без нажатия кнопок.
+
+### Задача 7
+Сделай таблицу оценок на `QTableWidget` с тремя столбцами «Имя», «Город», «Баллы». Над таблицей размести три поля `QLineEdit` и кнопку «Добавить строку», которая вставляет новую запись через `insertRow(rowCount())` и заполняет ячейки `QTableWidgetItem`. Кнопка «Удалить выбранное» убирает строку с `currentRow()`, а ярлык под таблицей показывает сумму баллов по всем строкам. Ожидаемый вывод: после двух строк с баллами 40 и 60 ярлык показывает `Сумма баллов: 100`, после удаления одной — `Сумма баллов: 40`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -221,6 +240,12 @@ spin.valueChanged.connect(on_value_changed)   # сигнал
 
 ### Подсказка 5
 Создай `QTableWidget(4, 3, window)`. Заполняй `setItem(row, col, QTableWidgetItem(str(value)))`. Заголовки — `setHorizontalHeaderLabels(["Имя", "Город", "Баллы"])`. Ширина — `resizeColumnsToContents()`. Редактирование: подключи константу `QAbstractItemView.EditTrigger.DoubleClicked` через `table.setEditTriggers(...)`.
+
+### Подсказка 6
+`QComboBox.currentTextChanged` передаёт строку, а `QSpinBox.valueChanged` — число, но слот можно сделать универсальным: `def recalc(*args):`. Цену бери из словаря по ключу `size_combo.currentText()`, количество — через `qty_spin.value()`. Чтобы итог был верным сразу при запуске, вызови `recalc()` один раз после создания виджетов.
+
+### Подсказка 7
+Для добавления: `row = table.rowCount()`, затем `table.insertRow(row)` и три `setItem(row, col, QTableWidgetItem(text))`. Не забудь, что `setItem` принимает строку, а не число. Для суммы пройди по строкам и сложи `int(table.item(r, 2).text())`, пропуская пустые ячейки. После каждого изменения вызывай одну функцию `update_sum()`, чтобы ярлык не расходился с таблицей.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -382,6 +407,121 @@ sys.exit(app.exec())
 ```
 
 Что здесь происходит? `QTableWidget(4, 3, window)` создаёт таблицу,4 строки × 3 столбца. `setHorizontalHeaderLabels` задаёт заголовки. Цикл `enumerate(data)` проходит по списку кортежей: `(row, (name, city, score))` распаковывается в три переменные, и каждая ячейка заполняется `QTableWidgetItem`. `resizeColumnsToContents()` подгоняет ширину столбцов под содержимое. `setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)` разрешает редактирование только двойным кликом — при одиночном клике ячейка просто выделяется.
+
+### Разбор 6
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QComboBox,
+                             QSpinBox, QVBoxLayout, QFormLayout)
+
+app = QApplication(sys.argv)
+window = QWidget()
+window.setWindowTitle("Заказ пиццы")
+window.resize(360, 220)
+
+layout = QVBoxLayout(window)
+form = QFormLayout()
+
+size_combo = QComboBox()
+size_combo.addItems(["Маленькая", "Средняя", "Большая"])
+
+qty_spin = QSpinBox()
+qty_spin.setRange(1, 10)
+qty_spin.setValue(1)
+
+form.addRow("Размер:", size_combo)
+form.addRow("Количество:", qty_spin)
+layout.addLayout(form)
+
+PRICES = {"Маленькая": 400, "Средняя": 550, "Большая": 700}
+total_label = QLabel("Итого: 0 ₽")
+layout.addWidget(total_label)
+
+def recalc(*args):
+    price = PRICES[size_combo.currentText()]
+    total = price * qty_spin.value()
+    total_label.setText(f"Итого: {total} ₽")
+
+size_combo.currentTextChanged.connect(recalc)
+qty_spin.valueChanged.connect(recalc)
+recalc()
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? `QComboBox.currentTextChanged` и `QSpinBox.valueChanged` несут разные типы — строку и число, — но слот с `*args` принимает любое количество аргументов и просто игнорирует их: все данные он берёт из самих виджетов. Это удобный приём, когда сигналов несколько, а логика одна. Словарь `PRICES` связывает отображаемый текст с ценой — если добавить новый размер, достаточно расширить словарь и список элементов. Вызов `recalc()` после подписок нужен, чтобы ярлык сразу показывал 400 рублей, а не 0. Обрати внимание: `QFormLayout.addRow` сам выравнивает подписи и поля в две колонки.
+
+### Разбор 7
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit,
+                             QPushButton, QTableWidget, QTableWidgetItem,
+                             QVBoxLayout, QHBoxLayout)
+
+app = QApplication(sys.argv)
+window = QWidget()
+window.setWindowTitle("Оценки")
+window.resize(480, 320)
+
+layout = QVBoxLayout(window)
+inputs = QHBoxLayout()
+name_edit = QLineEdit()
+name_edit.setPlaceholderText("Имя")
+city_edit = QLineEdit()
+city_edit.setPlaceholderText("Город")
+score_edit = QLineEdit()
+score_edit.setPlaceholderText("Баллы")
+for widget in (name_edit, city_edit, score_edit):
+    inputs.addWidget(widget)
+layout.addLayout(inputs)
+
+table = QTableWidget(0, 3)
+table.setHorizontalHeaderLabels(["Имя", "Город", "Баллы"])
+layout.addWidget(table)
+
+add_button = QPushButton("Добавить строку")
+remove_button = QPushButton("Удалить выбранное")
+sum_label = QLabel("Сумма баллов: 0")
+for widget in (add_button, remove_button, sum_label):
+    layout.addWidget(widget)
+
+def update_sum():
+    total = 0
+    for row in range(table.rowCount()):
+        item = table.item(row, 2)
+        if item and item.text().isdigit():
+            total += int(item.text())
+    sum_label.setText(f"Сумма баллов: {total}")
+
+def add_row():
+    row = table.rowCount()
+    table.insertRow(row)
+    table.setItem(row, 0, QTableWidgetItem(name_edit.text().strip()))
+    table.setItem(row, 1, QTableWidgetItem(city_edit.text().strip()))
+    table.setItem(row, 2, QTableWidgetItem(score_edit.text().strip()))
+    for widget in (name_edit, city_edit, score_edit):
+        widget.clear()
+    update_sum()
+
+def remove_row():
+    row = table.currentRow()
+    if row >= 0:
+        table.removeRow(row)
+        update_sum()
+
+add_button.clicked.connect(add_row)
+remove_button.clicked.connect(remove_row)
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? `QTableWidget(0, 3)` создаёт пустую таблицу с тремя столбцами, а `insertRow(rowCount())` добавляет строку в конец — это правильный способ для таблиц, в отличие от списков. Каждая ячейка обёрнута в `QTableWidgetItem`: таблица хранит не строки, а объекты элементов. `update_sum` перебирает все строки и проверяет `item.text().isdigit()`, потому что в третьем столбце могло оказаться не число или пустая ячейка — без проверки программа упала бы на `int("")`. `currentRow()` возвращает `-1`, если ничего не выбрано, поэтому удаление защищено условием. После каждого изменения сумма пересчитывается заново, а не инкрементируется — так она не расходится с реальным содержимым.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -454,4 +594,32 @@ setRange задаёт минимальное и максимальное зна�
 - Сортирует столбцы
 * Правильный ответ: Подгоняет ширину столбцов под содержимое
 Метод вычисляет ширину каждого столбца по самым широким ячейкам.
+
+Как добавить строку «подпись — поле» в QFormLayout?
+- form.addRow("Логин:", QLineEdit())
+- form.addWidget("Логин:")
+- form.addRow(QLineEdit())
+* Правильный ответ: form.addRow("Логин:", QLineEdit())
+addRow принимает подпись и виджет и строит две колонки.
+
+Каким сигналом QComboBox сообщает о смене выбранного текста?
+- currentTextChanged
+- textEdited
+- clicked
+* Правильный ответ: currentTextChanged
+Сигнал передаёт строку нового выбранного пункта.
+
+Что вернёт QSpinBox.value() при значении 3?
+- Число 3
+- Строку "3"
+- Ничего, нужен text()
+* Правильный ответ: Число 3
+QSpinBox работает с целыми числами, value() возвращает int.
+
+Как добавить пустую строку в конец QTableWidget?
+- table.insertRow(table.rowCount())
+- table.addRow()
+- table.append(row)
+* Правильный ответ: table.insertRow(table.rowCount())
+insertRow принимает индекс, а rowCount() даёт позицию после последней строки.
 <!--/QUIZ-->

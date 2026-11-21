@@ -122,6 +122,20 @@ server {
 
 Обрати внимание на `notify: restart_nginx`: задача не перезапускает службу сразу, а «уведомляет» хэндлер. Хэндлер выполнится в конце плейбука, и только если задача реально что-то изменила. Это экономит перезапуски и делает плейбук идемпотентным.
 
+Вот как выглядит путь одной задачи от управляющей машины до изменения на сервере:
+
+```mermaid
+flowchart TD
+    A["Control node"] --> B["Инвентори hosts.yml"]
+    B --> C["Плейбук: задачи"]
+    C --> D{"Что-то изменилось?"}
+    D -->|"да"|" E["notify: хэндлер"]
+    D -->|"нет"| F["ok, без действий"]
+    E --> G["restart nginx"]
+```
+
+Схема подчёркивает главное: плейбук не «выполняет команды», а приводит хосты к состоянию и сообщает, что именно поменялось. Ветка `ok` — не ошибка, а признак идемпотентности.
+
 ## Итог
 
 Мы разобрали основы Ansible: инвентори, модули, плейбуки, переменные, шаблоны и хэндлеры. Ansible — это способ превратить «я вручную починил сервер» в «вот файл, который воспроизводит состояние сервера». Дальше закрепим всё практикой.
@@ -141,6 +155,12 @@ server {
 
 ### Задача 5
 Дополни плейбук из задачи 2: добавь задачу, которая копирует шаблон `nginx.conf.j2` в `/etc/nginx/sites-available/default` (модуль `template`, ключ `notify: restart_nginx`), и блок `handlers` с хэндлером `restart_nginx`, который перезапускает службу `nginx`. Затем расширь тест `test_playbook.py`: добавь проверку, что у каждой задачи с ключом `notify` этот хэндлер существует в `handlers` (по ключу `name`). Ожидаемый результат: все тесты проходят, и ты умеешь объяснять, почему хэндлер вызывается только при изменении файла.
+### Задача 6
+Вынеси переменные группы `web` в отдельный файл `group_vars/web.yml`: `ansible_user: ubuntu`, `nginx_port: 8080`, `server_name: example.com`. В `hosts.yml` у хостов оставь только `ansible_host`, а из блока `vars` плейбука убери `nginx_port` и `server_name`. Добавь в плейбук третью задачу с модулем `debug`, которая печатает адрес `http://{{ server_name }}:{{ nginx_port }}`, и поставь ей условие `when: nginx_port != 80`. Напиши тест `test_vars.py`: он проверяет, что в `group_vars/web.yml` есть все три переменные, что в инвентори у хостов нет `ansible_user` и что в плейбуке есть задача с ключом `when`, использующая `nginx_port`. Ожидаемый результат: `pytest test_vars.py -v` — 3 passed, а `ansible-playbook -i hosts.yml install_nginx.yml --check` не жалуется на неопределённые переменные.
+
+### Задача 7
+Создай файл `state.json` с фактическим состоянием: `{"web-01": 8080, "web-02": 8081, "db-01": 8080}` — это порты, на которых nginx реально слушает. Напиши скрипт `drift_report.py`, который читает `hosts.yml`, желаемый порт из `group_vars/web.yml` и `state.json`, а затем печатает отчёт по строке на хост: `web-01: ok`, `web-02: drift 8080 -> 8081`, `db-01: вне группы web`. Скрипт возвращает код `1`, если дрейф найден, и `0`, если всё совпало. Напиши тест `test_drift_report.py`, который запускает скрипт через `subprocess.run` и проверяет код возврата и все три строки вывода. Ожидаемый вывод: `web-01: ok`, `web-02: drift 8080 -> 8081`, `db-01: вне группы web`, код возврата `1`.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -158,6 +178,12 @@ Jinja2: `from jinja2 import Template`; создай объект `Template(open(
 
 ### Подсказка 5
 У плейбука появится ключ `handlers`, который находится на том же уровне, что и `tasks`, и содержит список задач с `name`. В тесте собери имена хэндлеров в множество (`{h["name"] for h in handlers}`) и сравни с каждым значением `notify` из задач. Не забудь, что `notify` может быть строкой или списком.
+### Подсказка 6
+Ansible сам подхватывает `group_vars/<имя_группы>.yml` рядом с инвентори: структура файла — плоский словарь без обёрток. В тесте читай оба файла через `yaml.safe_load`, а задачу с условием ищи так: `[t for t in play["tasks"] if "when" in t]`.
+
+### Подсказка 7
+Собери множество хостов группы из инвентори и сравни с ключами `state.json` — разница и есть «хосты вне группы». Для запуска скрипта из теста используй `subprocess.run(["python", "drift_report.py"], capture_output=True, text=True)` и смотри на `returncode` и `stdout`.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -322,6 +348,146 @@ def test_notify_refers_to_handler():
 ```
 
 Что здесь происходит? Ключ `notify` связывает задачу с хэндлером: если задача реально изменила состояние (файл скопирован заново), Ansible в конце плейбука выполнит `restart_nginx`. Если изменений нет — хэндлер не сработает, и служба не будет перезапущена зря. Тест собирает имена хэндлеров в множество и проверяет, что каждое имя из `notify` (строка или список) там присутствует. Это защищает от классической ошибки — «handler не найден» на реальном прогоне.
+### Разбор 6
+Решение. `group_vars/web.yml`:
+
+```yaml
+ansible_user: ubuntu
+nginx_port: 8080
+server_name: example.com
+```
+
+`hosts.yml` — без переменных у хостов:
+
+```yaml
+all:
+  children:
+    web:
+      hosts:
+        web-01:
+          ansible_host: 10.0.1.10
+        web-02:
+          ansible_host: 10.0.1.11
+```
+
+Фрагмент плейбука:
+
+```yaml
+    - name: Показать адрес сервиса
+      debug:
+        msg: "http://{{ server_name }}:{{ nginx_port }}"
+      when: nginx_port != 80
+```
+
+Тест `test_vars.py`:
+
+```python
+import yaml
+
+
+def load(path):
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def test_group_vars_web():
+    data = load("group_vars/web.yml")
+    assert data["ansible_user"] == "ubuntu"
+    assert data["nginx_port"] == 8080
+    assert data["server_name"] == "example.com"
+
+
+def test_inventory_has_no_duplicated_vars():
+    inv = load("hosts.yml")
+    for host in inv["all"]["children"]["web"]["hosts"].values():
+        assert "ansible_user" not in host
+
+
+def test_playbook_uses_group_vars():
+    play = load("install_nginx.yml")[0]
+    conditional = [t for t in play["tasks"] if "when" in t]
+    assert conditional, "нет задачи с when"
+    assert any("nginx_port" in str(t) for t in conditional)
+    assert "nginx_port" not in play.get("vars", {})
+```
+
+Что здесь происходит? `group_vars/web.yml` — стандартное место переменных группы: Ansible читает его автоматически, без `vars_files`. Переменные действуют на все хосты группы `web`, поэтому дублировать `ansible_user` в инвентори больше не нужно — и тест это охраняет. Задача с `debug` ничего не меняет на сервере, а `when` показывает условное выполнение: на окружении с портом `80` лишняя строка не печатается. Третий тест заодно запрещает возвращать переменные обратно в плейбук: одна переменная должна жить в одном месте, иначе окружения снова начнут расходиться.
+
+### Разбор 7
+Решение. `drift_report.py`:
+
+```python
+import json
+import sys
+
+import yaml
+
+
+DESIRED_FILE = "group_vars/web.yml"
+INVENTORY = "hosts.yml"
+STATE = "state.json"
+
+
+def main():
+    with open(INVENTORY, encoding="utf-8") as f:
+        inv = yaml.safe_load(f)
+    with open(DESIRED_FILE, encoding="utf-8") as f:
+        desired = yaml.safe_load(f)["nginx_port"]
+    with open(STATE, encoding="utf-8") as f:
+        actual = json.load(f)
+
+    web_hosts = sorted(inv["all"]["children"]["web"]["hosts"])
+    drift = False
+
+    for host in web_hosts:
+        port = actual.get(host)
+        if port is None:
+            print(f"{host}: нет данных")
+            drift = True
+        elif port != desired:
+            print(f"{host}: drift {desired} -> {port}")
+            drift = True
+        else:
+            print(f"{host}: ok")
+
+    for host in sorted(set(actual) - set(web_hosts)):
+        print(f"{host}: вне группы web")
+
+    return 1 if drift else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Тест `test_drift_report.py`:
+
+```python
+import subprocess
+
+
+def run():
+    return subprocess.run(
+        ["python", "drift_report.py"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_drift_exit_code():
+    assert run().returncode == 1
+
+
+def test_drift_output_lines():
+    out = run().stdout
+    assert "web-01: ok" in out
+    assert "web-02: drift 8080 -> 8081" in out
+    assert "db-01: вне группы web" in out
+```
+
+Что здесь происходит? Скрипт — маленькая модель того, чем занимается Ansible в режиме `--check`: он берёт желаемое состояние (`group_vars`), фактическое (`state.json`) и печатает расхождения. Порядок хостов берётся из инвентори и сортируется, поэтому вывод стабилен и его можно проверять тестом. Хосты из `state.json`, которых нет в группе, попадают в отдельную строку — это тоже дрейф, только «лишний» хост. Код возврата делает скрипт пригодным для CI: единица останавливает пайплайн. Тест запускает именно процесс, а не функцию, — так проверяется и парсинг аргументов, и формат вывода целиком.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -394,4 +560,32 @@ become: true включает повышение привилегий через
 - pip
 * Правильный ответ: apt
 Модуль apt управляет пакетами в системах с apt (Debian, Ubuntu).
+Что делает флаг --limit web?
+- Ограничивает выполнение хостами группы web
+- Ускоряет плейбук в два раза
+- Удаляет группу web из инвентори
+* Правильный ответ: Ограничивает выполнение хостами группы web
+--limit сужает список целей, не меняя сам плейбук.
+
+Где Ansible ищет переменные группы web?
+- В файле group_vars/web.yml рядом с инвентори
+- В файле vars/web.ini внутри плейбука
+- Только в командной строке
+* Правильный ответ: В файле group_vars/web.yml рядом с инвентори
+group_vars подхватывается автоматически, без vars_files.
+
+Что означает статус changed у задачи?
+- Задача изменила состояние хоста
+- Задача упала с ошибкой
+- Задача была пропущена
+* Правильный ответ: Задача изменила состояние хоста
+changed показывает реальные изменения; ok — состояние уже совпадало.
+
+Что делает serial: 1 в плейбуке?
+- Выполняет плей на хостах по одному
+- Запускает плей ровно один раз
+- Ограничивает плей одним task
+* Правильный ответ: Выполняет плей на хостах по одному
+serial задаёт размер «волны» и используется для rolling-обновлений.
+
 <!--/QUIZ-->

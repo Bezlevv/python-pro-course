@@ -159,6 +159,19 @@ sys.exit(app.exec())
 
 Виджеты просто «накладываются» на окно по координатам. Это работает, но позиционировать вручную неудобно — в уроке 3 ты узнаешь про layout-ы, которые делают это автоматически.
 
+## Схема: анатомия Qt-приложения
+
+Любая программа на Qt проходит один и тот же путь: приложение → виджеты → показ → цикл событий.
+
+```mermaid
+flowchart TD
+    A["QApplication"] --> B["Виджеты: QLabel, QLineEdit"]
+    B --> C["Родитель или layout"]
+    C --> D["window.show()"]
+    D --> E["app.exec(): цикл событий"]
+    E --> F["Закрытие окна"]
+```
+
 ## Итог урока
 
 Теперь ты знаешь:
@@ -185,6 +198,17 @@ sys.exit(app.exec())
 
 ### Задача 5
 Собери «форму обратной связи»: окно с ярлыком «Ваш отзыв», полем ввода и кнопкой «Отправить». Каждому виджету задай уникальное имя через `setObjectName` (`window`, `label`, `edit`, `button`), а затем распечатай в консоль имена всех трёх виджетов и текст кнопки. Покажи окно.
+
+### Задача 6
+Собери окно «Карточка товара» 600×400 с заголовком «Витрина». Размести в нём четыре виджета: ярлык с HTML-заголовком `<b>Наушники</b>`, ярлык с ценой «2 990 ₽», поле ввода промокода с плейсхолдером «Промокод» и кнопку «Купить» с подсказкой «Оформить заказ». Каждому виджету задай уникальное имя через `setObjectName`. В консоль выведи ширину и высоту окна через `window.width()` и `window.height()`, а также список имён всех четырёх виджетов. Ожидаемый вывод:
+
+```
+Окно: 600x400
+Имена: ['title', 'price', 'promo', 'buy']
+```
+
+### Задача 7
+Собери окно «Анкета» 420×260 с тремя полями `QLineEdit`: имя (максимум 20 символов), email (плейсхолдер `you@example.com`), пароль в режиме `EchoMode.Password`. Программно заполни поля: имя «Аня», email «anya@mail.ru», пароль «secret123». Прочитай все три значения через `text()` и напечатай их в формате `Имя: Аня`, `Email: anya@mail.ru`, `Пароль: secret123`, затем очисти все поля через `clear()` и выведи суммарное количество оставшихся символов. Ожидаемый вывод: три строки со значениями и строка `После очистки: 0`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -202,6 +226,12 @@ sys.exit(app.exec())
 
 ### Подсказка 5
 Создай три виджета и передай `window` первым аргументом каждому. Перед показом окна каждому задай `setObjectName("...")` и собери их имена в список, например `names = [label.objectName(), edit.objectName(), button.objectName()]`. Распечатай список и текст кнопки через `button.text()`.
+
+### Подсказка 6
+Создай виджеты с родителем `window`: `QLabel("<b>Наушники</b>", window)` и так далее, затем расставь их через `move` и `resize`. Имена задаются методом `setObjectName("title")`. Для вывода размера окна используй `window.width()` и `window.height()` — они возвращают числа после `resize`. Список имён собери так: `[title.objectName(), price.objectName(), promo.objectName(), buy.objectName()]`.
+
+### Подсказка 7
+Для пароля сохрани объект поля в переменную и вызови `setEchoMode(QLineEdit.EchoMode.Password)`. Заполнение — `setText(...)` для каждого поля. Длины после очистки считай как `len(name_edit.text()) + len(email_edit.text()) + len(password_edit.text())` — после трёх `clear()` получится ноль.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -356,6 +386,102 @@ sys.exit(app.exec())
 ```
 
 Что здесь происходит? `setObjectName` даёт виджету строковое имя. Оно нужно не для красоты: по имени виджет можно находить (`window.findChild(QLineEdit, "edit")`) и — главное — обращаться к нему в стилях QSS (урок 6), например `#button { background: green; }`. `objectName()` возвращает имя, `text()` — текст кнопки. Имена виджетов одной и той же программы могут повторяться, но по правилам Qt лучше, чтобы они были уникальными.
+
+### Разбор 6
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QWidget, QLabel,
+                             QLineEdit, QPushButton)
+
+app = QApplication(sys.argv)
+
+window = QWidget()
+window.setWindowTitle("Витрина")
+window.resize(600, 400)
+
+title = QLabel("<b>Наушники</b>", window)
+title.setObjectName("title")
+title.move(30, 30)
+title.resize(400, 40)
+
+price = QLabel("2 990 ₽", window)
+price.setObjectName("price")
+price.move(30, 90)
+
+promo = QLineEdit(window)
+promo.setObjectName("promo")
+promo.setPlaceholderText("Промокод")
+promo.move(30, 150)
+promo.resize(220, 32)
+
+buy = QPushButton("Купить", window)
+buy.setObjectName("buy")
+buy.setToolTip("Оформить заказ")
+buy.move(30, 210)
+
+print(f"Окно: {window.width()}x{window.height()}")
+print("Имена:", [title.objectName(), price.objectName(),
+                promo.objectName(), buy.objectName()])
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? Все четыре виджета созданы с родителем `window`, поэтому они принадлежат окну и рисуются внутри него. `setObjectName` даёт каждому строковый идентификатор — по нему потом находят виджеты и стилизуют их через QSS. `width()` и `height()` возвращают текущие размеры окна — после `resize(600, 400)` это ровно 600 и 400, но подожди с печатью до `show()`: до показа размеры уже заданы, однако окончательная геометрия может подстроиться под экран. Обрати внимание, что HTML-тег `<b>` в `QLabel` включает жирный шрифт без всяких стилей — Qt понимает упрощённую разметку.
+
+### Разбор 7
+Решение:
+
+```python
+import sys
+from PyQt6.QtWidgets import (QApplication, QWidget, QLabel,
+                             QLineEdit, QVBoxLayout)
+
+app = QApplication(sys.argv)
+
+window = QWidget()
+window.setWindowTitle("Анкета")
+window.resize(420, 260)
+
+layout = QVBoxLayout(window)
+
+name_edit = QLineEdit()
+name_edit.setMaxLength(20)
+name_edit.setPlaceholderText("Имя")
+
+email_edit = QLineEdit()
+email_edit.setPlaceholderText("you@example.com")
+
+password_edit = QLineEdit()
+password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+password_edit.setPlaceholderText("Пароль")
+
+for widget in (QLabel("Имя:"), name_edit, QLabel("Email:"), email_edit,
+               QLabel("Пароль:"), password_edit):
+    layout.addWidget(widget)
+
+name_edit.setText("Аня")
+email_edit.setText("anya@mail.ru")
+password_edit.setText("secret123")
+
+print("Имя:", name_edit.text())
+print("Email:", email_edit.text())
+print("Пароль:", password_edit.text())
+
+name_edit.clear()
+email_edit.clear()
+password_edit.clear()
+
+total = len(name_edit.text()) + len(email_edit.text()) + len(password_edit.text())
+print("После очистки:", total)
+
+window.show()
+sys.exit(app.exec())
+```
+
+Что здесь происходит? Три поля ввода отличаются только настройками: `setMaxLength(20)` не даст ввести двадцать первый символ, `EchoMode.Password` заменяет буквы точками, но `text()` всё равно возвращает настоящий текст — режим влияет только на отображение. `setText` заполняет поле программно, а `clear` опустошает его. Сумма длин после очистки равна нулю — это проверка, что `clear()` действительно сработал на всех трёх полях. Обрати внимание: `QVBoxLayout(window)` сразу назначает раскладку окну, поэтому `setCentralWidget` здесь не нужен — это разные способы компоновки, и для `QWidget` хватает первого.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -428,4 +554,32 @@ setWindowTitle("...") устанавливает текст в строке за
 - Добавляет кнопке второй текст
 * Правильный ответ: Отключает кнопку: она серая и не реагирует на клики
 Выключенные виджеты не принимают события мыши и клавиатуры.
+
+Как скрыть вводимый пароль точками в QLineEdit?
+- setEchoMode(QLineEdit.EchoMode.Password)
+- setPlaceholderText("***")
+- setMaxLength(0)
+* Правильный ответ: setEchoMode(QLineEdit.EchoMode.Password)
+EchoMode.Password заменяет символы на точки, не меняя реальный текст.
+
+Что делает setMaxLength(20)?
+- Ограничивает ввод двадцатью символами
+- Задаёт ширину поля в 20 пикселей
+- Запрещает вставлять текст
+* Правильный ответ: Ограничивает ввод двадцатью символами
+Двадцать первый символ просто не введётся.
+
+Зачем виджету задают setObjectName?
+- Чтобы находить его по имени и стилизовать через QSS
+- Чтобы изменить его размер
+- Чтобы перевести его на другой язык
+* Правильный ответ: Чтобы находить его по имени и стилизовать через QSS
+objectName — строковый идентификатор для поиска и стилей.
+
+Что возвращает password_edit.text() при включённом EchoMode.Password?
+- Настоящий введённый текст, а не точки
+- Строку из звёздочек
+- Пустую строку
+* Правильный ответ: Настоящий введённый текст, а не точки
+Режим влияет только на отображение, данные остаются прежними.
 <!--/QUIZ-->

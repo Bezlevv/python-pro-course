@@ -127,6 +127,21 @@ handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(messa
 
 Когда файл достигает 10 МБ, обработчик закрывает его, переименовывает в `app.log.1` и начинает новый; хранится 5 копий. Это классический паттерн «log rotation».
 
+## Путь записи: от вызова до хранилища
+
+Прежде чем писать код, полезно увидеть, что происходит с одной строкой лога. Вызов `logger.info()` создаёт `LogRecord`, затем его последовательно обрабатывают фильтры, форматтер и handler:
+
+```mermaid
+flowchart LR
+    A["logger.info()"] --> B["LogRecord"]
+    B --> C["Фильтры"]
+    C --> D["JSON-форматтер"]
+    D --> E["Handler"]
+    E --> F["Файл или Loki"]
+```
+
+Каждый этап настраивается независимо: фильтр добавит `correlation_id`, форматтер превратит запись в JSON, а handler решит, куда её отправить — в консоль, файл с ротацией или по сети в Loki. Именно поэтому в примерах выше мы отдельно создаём formatter, отдельно handler и отдельно навешиваем filter.
+
 ## Лучшие практики
 
 - **Никогда не логируй секреты**: пароли, токены, номера карт. В JSON они станут легко искомыми.
@@ -150,6 +165,11 @@ handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(messa
 
 ### Задача 5
 Добавь в модуль `logging_setup.py` фильтр `SecretsFilter`, который маскирует секретные поля в записях. Фильтр должен проходить по `record.__dict__` и для ключей, содержащих `password`, `token` или `secret` (без учёта регистра), заменять значение на `"***"`. Измени `setup_logger()` так, чтобы фильтр добавлялся к обработчику. В задаче 1 или 3 попробуй залогировать `extra={"password": "hunter2", "token": "abc"}` и убедись, что в JSON-выводе вместо значений стоит `"***"` (сам вывод в pytest при этом проверять не нужно).
+### Задача 6
+Настрой в `logging_setup.py` функцию `setup_file_logger(path: str) -> logging.Logger`, которая пишет JSON-логи в файл с суточной ротацией. Используй `logging.handlers.TimedRotatingFileHandler(when="midnight", backupCount=7, encoding="utf-8", utc=True)` и тот же JSON-форматтер с полями `timestamp`, `level`, `logger`, `message`. В скрипте `rotate_demo.py` запиши три события `order created` с разными `order_id`, затем принудительно вызови `doRollover()` у обработчика (он доступен как `logger.handlers[0]`), запиши четвёртое событие и выведи `sorted(os.listdir("."))`. Ожидаемый вывод: два файла — `app.log` и `app.log.<дата>` — и валидные JSON-строки в обоих.
+
+### Задача 7
+Добавь сквозную корреляцию в FastAPI. В `app.py` создай `FastAPI()`, подключи `CorrelationIdFilter` к обработчику логгера `app` и напиши HTTP-middleware: он читает заголовок `X-Request-ID`, при отсутствии генерирует `uuid.uuid4().hex`, ставит значение через `token = correlation_id.set(...)`, логирует `logger.info("request started", extra={"path": request.url.path})`, вызывает `call_next`, добавляет ответу заголовок `X-Request-ID` и в `finally` делает `correlation_id.reset(token)`. В `test_request_id.py` через `TestClient` выполни два запроса с разными id и проверь, что заголовок ответа совпадает с отправленным, а в перехваченных логах каждый запрос имеет свой `correlation_id`. Ожидаемый вывод: два ответа `200` и две записи с id `req-1` и `req-2`.
 <!--/TASK-->
 
 <!--HINT-->
@@ -167,6 +187,11 @@ handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(messa
 
 ### Подсказка 5
 Фильтр — это класс с методом `filter(self, record) -> bool`. Модифицируй атрибуты прямо в `record` (например, `setattr(record, key, "***")`), но не трогай стандартные поля `message`, `levelname` и т. д. Проверку проще всего сделать глазами при запуске скрипта из задачи 1: в JSON вместо `"password": "hunter2"` должно быть `"password": "***"`.
+### Подсказка 6
+`TimedRotatingFileHandler` принимает `when="midnight"`, `backupCount=7`, `utc=True` и `encoding="utf-8"`; форматтер тот же, что в задаче 2. Ротацию можно проверить без ожидания полуночи: `logger.handlers[0].doRollover()` переименует текущий файл в `app.log.YYYY-MM-DD` и откроет новый. Не забудь `logger.propagate = False`, иначе записи продублируются в корневой логгер и в файле окажется больше строк, чем ожидаешь.
+
+### Подсказка 7
+Middleware объявляется как `@app.middleware("http")` и принимает `request: Request, call_next`. Заголовок ответа удобно ставить после `await call_next(request)`, но `reset(token)` делай в `finally` — иначе при исключении контекст «протечёт» в следующий запрос. В тесте подмени `logger.handlers` на `StreamHandler(io.StringIO())` с тем же фильтром и форматтером, иначе записи уйдут в консоль и разбирать их будет нечем.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -360,6 +385,134 @@ $ python -c "import logging; from logging_setup import setup_logger; l=setup_log
 ```
 
 Секреты никогда не должны попадать в логи: после подобного инцидента пароли оказываются в поисковых системах и баг-трекерax. Фильтр — это защитный барьер на выходе, но главное правило всё равно впереди: не логировать секреты вовсе.
+### Разбор 6
+Решение (`logging_setup.py`):
+
+```python
+import logging
+import logging.handlers
+from pythonjsonlogger import jsonlogger
+
+def setup_file_logger(path: str) -> logging.Logger:
+    logger = logging.getLogger("file")
+    logger.handlers = []
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    handler = logging.handlers.TimedRotatingFileHandler(
+        path, when="midnight", backupCount=7, encoding="utf-8", utc=True
+    )
+    handler.setFormatter(
+        jsonlogger.JsonFormatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s",
+            rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
+        )
+    )
+    logger.addHandler(handler)
+    return logger
+```
+
+Скрипт `rotate_demo.py`:
+
+```python
+import os
+from logging_setup import setup_file_logger
+
+logger = setup_file_logger("app.log")
+for order_id in (1, 2, 3):
+    logger.info("order created", extra={"order_id": order_id})
+
+logger.handlers[0].doRollover()
+logger.info("order created", extra={"order_id": 4})
+print(sorted(os.listdir(".")))
+```
+
+Пример вывода:
+
+```text
+['app.log', 'app.log.2026-11-21']
+```
+
+Что здесь происходит? `TimedRotatingFileHandler` следит за календарём, а не за размером: в полночь он переименовывает текущий файл, добавляя к имени дату, и открывает новый `app.log`. Параметр `backupCount=7` означает, что хранятся семь последних архивов, а более старые удаляются — иначе диск рано или поздно закончится. Вызов `doRollover()` делает то же самое вручную, поэтому демонстрация не зависит от системных часов. `utc=True` фиксирует ротацию по UTC, что важно, когда серверы стоят в разных часовых поясах. Наконец, `logger.propagate = False` не даёт записи уйти в корневой логгер: иначе в `app.log` оказались бы дубликаты, и подсчёт событий в хранилище был бы неверным.
+
+### Разбор 7
+Решение (`app.py`):
+
+```python
+import logging
+import uuid
+from contextvars import ContextVar
+
+from fastapi import FastAPI, Request
+from pythonjsonlogger import jsonlogger
+
+correlation_id: ContextVar[str] = ContextVar("correlation_id", default="-")
+
+class CorrelationIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation_id = correlation_id.get()
+        return True
+
+logger = logging.getLogger("app")
+logger.handlers = []
+logger.setLevel(logging.INFO)
+logger.propagate = False
+handler = logging.StreamHandler()
+handler.setFormatter(
+    jsonlogger.JsonFormatter("%(levelname)s %(message)s", rename_fields={"levelname": "level"})
+)
+handler.addFilter(CorrelationIdFilter())
+logger.addHandler(handler)
+
+app = FastAPI()
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    token = correlation_id.set(request_id)
+    try:
+        logger.info("request started", extra={"path": request.url.path})
+        response = await call_next(request)
+    finally:
+        correlation_id.reset(token)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+```
+
+Тест (`test_request_id.py`):
+
+```python
+import io
+import json
+import logging
+
+from fastapi.testclient import TestClient
+from pythonjsonlogger import jsonlogger
+
+import app as app_module
+
+def make_client():
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(
+        jsonlogger.JsonFormatter("%(levelname)s %(message)s", rename_fields={"levelname": "level"})
+    )
+    handler.addFilter(app_module.CorrelationIdFilter())
+    app_module.logger.handlers = [handler]
+    return TestClient(app_module.app), buf
+
+def test_request_id_isolated():
+    client, buf = make_client()
+    assert client.get("/ping", headers={"X-Request-ID": "req-1"}).headers["X-Request-ID"] == "req-1"
+    assert client.get("/ping", headers={"X-Request-ID": "req-2"}).headers["X-Request-ID"] == "req-2"
+    records = [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+    assert [r["correlation_id"] for r in records] == ["req-1", "req-2"]
+```
+
+Что здесь происходит? Middleware выполняется до эндпоинта и после него, поэтому это идеальное место для установки контекста запроса. Мы не доверяем клиенту слепо: заголовок принимается, только если он есть, иначе генерируется свой — и в любом случае возвращается в ответе, чтобы клиент и поддержка могли сослаться на конкретный запрос. `ContextVar` в связке с `reset(token)` гарантирует изоляцию: даже если один запрос обрабатывается дольше другого, его записи не смешаются с чужими. Фильтр превращает значение контекста в поле `correlation_id` каждой JSON-строки, а `TestClient` позволяет проверить это без запуска uvicorn и без сети. Такой шаблон переносится на любой ASGI-фреймворк: меняется только способ объявления middleware.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -432,4 +585,31 @@ ERROR — серьёзная ошибка; INFO — событие успеха;
 - JSON не поддерживает строки
 * Правильный ответ: Попадут в логи в открытом виде и станут искомыми
 Секреты в логах — утечка данных; их нужно маскировать или не логировать вовсе.
+Какой обработчик ротирует лог по расписанию, а не по размеру?
+- RotatingFileHandler
+- TimedRotatingFileHandler
+- WatchedFileHandler
+* Правильный ответ: TimedRotatingFileHandler
+TimedRotatingFileHandler принимает when="midnight" (или "H", "D") и хранит backupCount архивов.
+
+Что произойдёт при вызове logger.info("x", extra={"message": "y"})?
+- Поле message перезапишется
+- Возникнет KeyError: Attempt to overwrite 'message' in LogRecord
+- Запись молча пропадёт
+* Правильный ответ: Возникнет KeyError: Attempt to overwrite 'message' in LogRecord
+Имена стандартных атрибутов LogRecord зарезервированы; для своих полей выбирай другие ключи.
+
+Зачем устанавливать logger.propagate = False?
+- Чтобы отключить уровни логирования
+- Чтобы записи не дублировались через корневой логгер
+- Чтобы ускорить сериализацию JSON
+* Правильный ответ: Чтобы записи не дублировались через корневой логгер
+Иначе запись обработает и собственный handler, и handler родителя, и в файле появятся дубликаты.
+
+Чем logger.exception("failed") отличается от logger.error("failed")?
+- Ничем, это синонимы
+- Автоматически добавляет traceback текущего исключения
+- Понижает уровень до WARNING
+* Правильный ответ: Автоматически добавляет traceback текущего исключения
+logger.exception эквивалентен error(..., exc_info=True) и применяется внутри блока except.
 <!--/QUIZ-->

@@ -71,6 +71,20 @@ while True:
 
 Такой бот называется «эхо»: он повторяет слова собеседника. Не забывай про паузы: опрашивать сервер сотню раз в секунду не нужно — добавь `time.sleep(1)` в конец цикла, и Telegram будет доволен. Ещё один совет: перед ответом всегда проверяй, что в сообщении есть текст (фото или стикер текста не имеют), иначе бот упадёт с `KeyError`. Схема готова — теперь соберём бота по-настоящему.
 
+Полный путь сообщения через бота выглядит так:
+
+```mermaid
+flowchart LR
+    U["Пользователь"] --> T["Bot API"]
+    T --> G["getUpdates и offset"]
+    G --> P["Разбор update"]
+    P --> C{"Команда?"}
+    C -->|"да"| R["Текст ответа"]
+    C -->|"нет"| E["Эхо"]
+    R --> S["sendMessage"]
+    E --> S
+```
+
 <!--TASK-->
 ### Задача 1
 Напиши программу, которая обращается к методу `getMe` Bot API и печатает две строки: `Имя: <first_name>` и `Username: <username>`. Токен положи в переменную `TOKEN` (подставь свой или заглушку для тренировки). Используй `requests.get(...).json()` и обратись к ключу `["result"]`. Ожидаемый результат: две строки с именем и username твоего бота без ошибок.
@@ -86,6 +100,12 @@ while True:
 
 ### Задача 5
 Добавь в эхо-бота обработку команд. На `/start` бот отвечает `Привет! Я учебный бот. Напиши /help`, на `/help` — `Команды: /start, /help. Остальное я повторяю как эхо.`, на любой другой текст — эхо. Используй `if`/`elif`, чтобы маршрутизировать текст сообщения. Ожидаемый результат: бот правильно реагирует на команды и повторяет обычные сообщения.
+
+### Задача 6
+Добавь в бота inline-кнопки. На команду `/menu` отправь сообщение `Выбери действие:` с клавиатурой из двух кнопок — `Погода` и `Время` (параметр `reply_markup` с полем `inline_keyboard`). Обработай нажатие: оно придёт не в `message`, а в объекте `callback_query` с полем `data` (`weather` или `time`). На нажатие ответь методом `answerCallbackQuery`, а затем отправь текст `Сегодня солнечно` или текущее время. Ожидаемый результат: по `/menu` приходит сообщение с двумя кнопками, а нажатие на каждую присылает соответствующий ответ.
+
+### Задача 7
+Научи бота вести статистику. При каждом текстовом сообщении увеличивай счётчик в словаре «имя пользователя → число сообщений», а по команде `/stats` присылай отчёт: строку `Всего сообщений: N` и по строке на каждого пользователя. Статистику сохраняй в файл `stats.json` после каждого сообщения и загружай при старте (модули `json` и `pathlib`), чтобы данные не терялись при перезапуске. Ожидаемый результат: после перезапуска бота команда `/stats` показывает те же числа, что и до него.
 <!--/TASK-->
 
 <!--HINT-->
@@ -103,6 +123,12 @@ while True:
 
 ### Подсказка 5
 Сначала получи `text`, затем `if text == "/start": ... elif text == "/help": ... else: ...`. В каждом случае вызывай `send_message(chat_id, ответ)`. Логика команд живёт прямо внутри цикла, перед эхо-веткой.
+
+### Подсказка 6
+Клавиатура — это обычный словарь: `{"inline_keyboard": [[{"text": "Погода", "callback_data": "weather"}, {"text": "Время", "callback_data": "time"}]]}`. Отправляй его через `requests.post(base_url + "sendMessage", json={"chat_id": chat_id, "text": "Выбери действие:", "reply_markup": keyboard})`. Нажатие лежит в `u.get("callback_query")`: там есть `id`, `data` и `message.chat.id`.
+
+### Подсказка 7
+Загружай статистику так: `stats = json.loads(Path("stats.json").read_text(encoding="utf-8")) if Path("stats.json").exists() else {}`. После изменения вызывай `Path("stats.json").write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")`. Для отчёта отсортируй словарь: `sorted(stats.items(), key=lambda kv: -kv[1])`.
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -239,6 +265,123 @@ while True:
 ```
 
 Что здесь происходит? Перед отправкой мы выбираем ответ через `if`/`elif`/`else`: команды обрабатываются специальными текстами, а всё остальное уходит в эхо. Это простейшая маршрутизация сообщений — ровно так работают куда более сложные боты, только с большим числом веток и обёртками. Обрати внимание, что `offset` обновляется до отправки ответа: даже если `send_message` упадёт, бот не зациклится на том же сообщении. Запусти бота и проверь все три реакции.
+
+### Разбор 6
+Решение:
+
+```python
+import time
+import requests
+
+TOKEN = "123456:ABC"
+base_url = f"https://api.telegram.org/bot{TOKEN}/"
+
+MENU = {"inline_keyboard": [[
+    {"text": "Погода", "callback_data": "weather"},
+    {"text": "Время", "callback_data": "time"},
+]]}
+
+def send_message(chat_id, text, markup=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if markup:
+        payload["reply_markup"] = markup
+    requests.post(base_url + "sendMessage", json=payload)
+
+offset = 0
+while True:
+    r = requests.get(base_url + "getUpdates", params={"offset": offset}).json()
+    for u in r["result"]:
+        offset = u["update_id"] + 1
+
+        if "callback_query" in u:
+            cb = u["callback_query"]
+            chat_id = cb["message"]["chat"]["id"]
+            requests.post(base_url + "answerCallbackQuery",
+                          data={"callback_query_id": cb["id"]})
+            if cb["data"] == "weather":
+                send_message(chat_id, "Сегодня солнечно")
+            else:
+                send_message(chat_id, "Сейчас " + time.strftime("%H:%M"))
+            continue
+
+        msg = u.get("message", {})
+        chat_id = msg.get("chat", {}).get("id")
+        text = msg.get("text", "")
+        if chat_id is None or not text:
+            continue
+        if text == "/menu":
+            send_message(chat_id, "Выбери действие:", MENU)
+        else:
+            send_message(chat_id, f"Эхо: {text}")
+
+    time.sleep(1)
+```
+
+Что здесь происходит? Inline-кнопки не отправляются отдельным методом: они едут вместе с сообщением в параметре `reply_markup`. Здесь важно, что мы отправляем POST с `json=payload`, а не с `data=`: вложенный словарь клавиатуры нужно сериализовать в JSON целиком, иначе Telegram не разберёт структуру. Нажатие приходит как отдельный тип обновления — `callback_query`, у которого нет поля `text`, зато есть `data` и `id`. Пока бот не вызовет `answerCallbackQuery`, на кнопке крутится индикатор загрузки, поэтому этот вызов идёт первым. `continue` не даёт нажатию провалиться в обработку обычных сообщений, где `msg.get("text")` вернул бы пустую строку.
+
+### Разбор 7
+Решение:
+
+```python
+import json
+import time
+import requests
+from pathlib import Path
+
+TOKEN = "123456:ABC"
+base_url = f"https://api.telegram.org/bot{TOKEN}/"
+STATS = Path("stats.json")
+
+def load_stats():
+    if STATS.exists():
+        return json.loads(STATS.read_text(encoding="utf-8"))
+    return {}
+
+def save_stats(stats):
+    STATS.write_text(json.dumps(stats, ensure_ascii=False, indent=2),
+                     encoding="utf-8")
+
+def send_message(chat_id, text):
+    requests.post(base_url + "sendMessage",
+                  data={"chat_id": chat_id, "text": text})
+
+stats = load_stats()
+offset = 0
+
+while True:
+    r = requests.get(base_url + "getUpdates", params={"offset": offset}).json()
+    for u in r["result"]:
+        offset = u["update_id"] + 1
+        msg = u.get("message", {})
+        text = msg.get("text", "")
+        chat_id = msg.get("chat", {}).get("id")
+        if not text or chat_id is None:
+            continue
+
+        if text == "/stats":
+            lines = [f"Всего сообщений: {sum(stats.values())}"]
+            for name, count in sorted(stats.items(), key=lambda kv: -kv[1]):
+                lines.append(f"{name}: {count}")
+            send_message(chat_id, "\n".join(lines))
+            continue
+
+        name = msg["from"].get("first_name", "гость")
+        stats[name] = stats.get(name, 0) + 1
+        save_stats(stats)
+        send_message(chat_id, f"Записал, {name}. Всего: {stats[name]}")
+
+    time.sleep(1)
+```
+
+Результат (пример ответа на `/stats`):
+
+```
+Всего сообщений: 7
+Аня: 5
+Игорь: 2
+```
+
+Что здесь происходит? Счётчик живёт в обычном словаре, но словарь исчезает при перезапуске — поэтому после каждого изменения он записывается в `stats.json`. Функция `load_stats` при старте проверяет, есть ли файл: `Path.exists()` защищает от падения на первом запуске, когда файла ещё нет. `ensure_ascii=False` сохраняет русские имена читаемыми, а `indent=2` делает файл удобным для глаза. Команда `/stats` обрабатывается до инкремента, и `continue` гарантирует, что сама команда не попадёт в статистику. Сортировка по `-kv[1]` ставит самых активных сверху, а `sum(stats.values())` даёт общий итог. Такой файл легко открыть, поправить руками и перенести на другую плату — это простейшая база данных бота.
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -305,4 +448,36 @@ sendMessage принимает chat_id и text и доставляет сооб�
 - Чтобы сэкономить трафик Telegram
 * Правильный ответ: У фото и стикеров текста нет, и без проверки можно поймать KeyError
 Используй message.get("text", "") или проверку if text: — тогда бот не упадёт на служебных событиях.
+
+Каким HTTP-методом отправляют сообщение через Bot API?
+- GET
+- POST
+- PUT
+- DELETE
+* Правильный ответ: POST
+sendMessage создаёт сообщение на стороне Telegram, поэтому используется POST с параметрами chat_id и text.
+
+Что означает поле "ok": false в ответе Bot API?
+- Сообщение доставлено
+- Запрос не выполнен, причина описана в поле description
+- Бот заблокирован навсегда
+- Нужно повторить запрос без токена
+* Правильный ответ: Запрос не выполнен, причина описана в поле description
+Bot API всегда возвращает ok, и при false полезно печатать description — иначе ошибка выглядит как «пустой» ответ.
+
+Где в обновлении лежит нажатие inline-кнопки?
+- В поле message.text
+- В объекте callback_query
+- В поле offset
+- В поле result
+* Правильный ответ: В объекте callback_query
+Нажатие приходит как callback_query с полями id, data и message.chat.id — на него отвечают answerCallbackQuery.
+
+Чем вебхук отличается от getUpdates?
+- Вебхук сам присылает обновления на указанный URL, а getUpdates требует постоянного опроса
+- Вебхук работает только в браузере
+- getUpdates быстрее и не имеет лимитов
+- Это одно и то же
+* Правильный ответ: Вебхук сам присылает обновления на указанный URL, а getUpdates требует постоянного опроса
+setWebhook избавляет от цикла опроса, но требует публичный HTTPS-адрес, доступный из интернета.
 <!--/QUIZ-->
