@@ -80,6 +80,14 @@ print(restored["name"])  # Аня
 
 `datetime` не сериализуется в JSON напрямую — будет ошибка. Решение: переводить в ISO-строку `isoformat()` или передать `default=str` в `dumps`.
 
+```mermaid
+flowchart LR
+    A["datetime.now()"] --> B["strftime"]
+    B --> C["Представление"]
+    C --> D["json: сериализация"]
+    D --> E["Кастомный encoder"]
+```
+
 ## Итог урока
 
 Мы узнали:
@@ -125,6 +133,11 @@ str
 Через 30 дней: 01.12.2026
 До конца года: 60 дн.
 ```
+### Задача 6 — Кастомный JSON-encoder для datetime
+Напиши класс `DateTimeEncoder(json.JSONEncoder)`, который превращает `datetime` в ISO-строку через `str(obj)`. Сериализуй `{"now": datetime.now()}` и напечатай. Ожидаемый результат: валидный JSON с датой.
+### Задача 7 — Часовые пояса
+Вычисли разницу между `datetime.now(timezone.utc)` и `datetime.now(timezone(timedelta(hours=3)))`. Ожидаемый вывод: разница ровно 3 часа. Объясни, почему timezone-aware значения важно держать в UTC в базе.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -142,6 +155,11 @@ str
 
 ### Подсказка 5
 `date.today() + timedelta(days=30)` даст дату через месяц. Для формата используй `.strftime("%d.%m.%Y")`. Конец года — `date(today.year, 12, 31)`, разность с сегодняшним днём бери через `.days`.
+### Подсказка 6
+`json.dumps(data, cls=DateTimeEncoder)` использует кастомный encoder для нестандартных типов.
+### Подсказка 7
+Разница двух aware-моментов даёт timedelta: `(a - b).total_seconds() / 3600` → 3.0.
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -290,6 +308,32 @@ print("До конца года:", left, "дн.")
 ```
 
 Комбинация `timedelta` и `strftime` покрывает большинство бытовых задач с датами: дедлайны, напоминания, отчёты.
+### Разбор 6
+```python
+import json
+from datetime import datetime
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+data = {"now": datetime.now()}
+print(json.dumps(data, cls=DateTimeEncoder))
+```
+Вывод: `{"now": "2026-11-21T12:00:00.123456"}`. Без encoder json не смог бы сериализовать datetime.
+### Разбор 7
+```python
+from datetime import datetime, timezone, timedelta
+
+utc = datetime.now(timezone.utc)
+msk = datetime.now(timezone(timedelta(hours=3)))
+diff_hours = (utc - msk).total_seconds() / 3600
+print(diff_hours)
+```
+Вывод: `-3.0`. В базе хранят UTC, а локальное время вычисляют при отображении — это стандарт.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -355,4 +399,37 @@ datetime не сериализуется напрямую; нужен default=st
 - ММ/ДД/ГГГГ
 * Правильный ответ: ГГГГ-ММ-ДД
 ISO-формат: сначала год, потом месяц, потом день, например 2026-12-31.
+Как сериализовать datetime в JSON?
+- Через кастомный JSONEncoder
+- Никак
+- Через int()
+- Через list()
+* Правильный ответ: Через кастомный JSONEncoder
+default() превращает datetime в строку.
+
+Что такое timezone-aware время?
+- Время с информацией о часовом поясе
+- Время UTC
+- Локальное время
+- Время с миллисекундами
+* Правильный ответ: Время с информацией о часовом поясе
+aware-объекты сравнимы и корректно вычитаются.
+
+Как получить текущее UTC-время?
+- datetime.now(timezone.utc)
+- datetime.now()
+- time.utcnow()
+- time.clock()
+* Правильный ответ: datetime.now(timezone.utc)
+Указываем явно часовой пояс UTC.
+
+Что делает strftime("%Y-%m-%d")?
+- Форматирует дату в строку
+- Парсит строку
+- Возвращает timestamp
+- Сравнивает даты
+* Правильный ответ: Форматирует дату в строку
+strftime — форматирование, strptime — разбор.
+
+# 
 <!--/QUIZ-->
