@@ -122,6 +122,13 @@ print("После индекса:", cur.fetchall())
 - Когда селективность низкая: например, колонка с двумя значениями из миллиона строк — индекс вернёт почти всю таблицу.
 - При `LIKE '%...'` — литеральный поиск с ведущим `%` не использует обычный B-tree индекс.
 
+```mermaid
+flowchart LR
+    A["Таблица"] --> B["Нормализация: 1НФ→3НФ"]
+    B --> C["Индексы"]
+    C --> D["EXPLAIN QUERY PLAN"]
+```
+
 ## Итог
 
 Нормализация делает схему честной и устойчивой к изменениям, а индексы — быстрой. Оба инструмента применяют осознанно: формальная нормализация ради галочки и бесконечные индексы одинаково вредны. Проверяй свои индексы через EXPLAIN QUERY PLAN.
@@ -179,6 +186,11 @@ INSERT INTO employees_bad VALUES
 
 ### Задача 5
 Напиши функцию `composite_plan(conn)`, которая создаёт таблицу `orders(id, user_id, status, amount)`, заполняет её 500 строками (статусы `'new'` и `'done'`), затем создаёт составной индекс `CREATE INDEX idx_orders_user_status ON orders(user_id, status)`. После этого выполни `EXPLAIN QUERY PLAN SELECT * FROM orders WHERE user_id = 7 AND status = 'new'` и верни строку плана. Проверь, что в ней есть `USING INDEX`. Выведи план.
+### Задача 6 — Составной индекс и EXPLAIN
+Создай таблицу orders (id, user_id, status, created_at) и наполни 1000 строк. Добавь составной индекс `(user_id, status)` и покажи `EXPLAIN QUERY PLAN SELECT * FROM orders WHERE user_id=? AND status=?` с индексом и без него (DROP INDEX). Ожидаемый результат: план с «SEARCH ... USING INDEX» против «SCAN».
+### Задача 7 — Денормализация для чтения
+Объясни на примере: для частого вывода «имя покупателя + число заказов» можно добавить в users поле orders_count и обновлять его при каждом заказе. Реализуй триггер SQLite `AFTER INSERT ON orders` увеличивающий orders_count. Проверь, что после вставки значение выросло.
+
 <!--/TASK-->
 
 <!--HINT-->
@@ -196,6 +208,11 @@ EXPLAIN QUERY PLAN возвращает строки вида `(0, 0, 0, 'SCAN o
 
 ### Подсказка 5
 Составной индекс работает, когда колонки в WHERE идут в том же порядке, что в индексе (сначала user_id, потом status). Сгенерируй строки циклом: `user_id = i % 50`, `status = 'new' if i % 2 == 0 else 'done'`, `amount = i * 10`. В EXPLAIN ищи `SEARCH orders USING INDEX idx_orders_user_status`.
+### Подсказка 6
+Индекс: `CREATE INDEX idx_orders_user_status ON orders(user_id, status)`. EXPLAIN покажет, используется ли индекс.
+### Подсказка 7
+Триггер: `CREATE TRIGGER inc_orders AFTER INSERT ON orders BEGIN UPDATE users SET orders_count = orders_count + 1 WHERE id = NEW.user_id; END;`
+
 <!--/HINT-->
 
 <!--SOLUTION-->
@@ -399,6 +416,26 @@ SEARCH orders USING INDEX idx_orders_user_status (user_id=? AND status=?)
 ```
 
 Что здесь происходит? Составной индекс `(user_id, status)` обслуживает запросы, которые фильтруют по обеим колонкам. Порядок колонок важен: индекс (user_id, status) поможет и для `WHERE user_id = 7`, и для `WHERE user_id = 7 AND status = 'new'`, но не для `WHERE status = 'new'` — левая колонка индекса должна участвовать в условии. Если бы мы создали индекс (status, user_id), ситуация была бы обратной. План SEARCH подтверждает: база идёт по индексу, а не сканирует таблицу.
+### Разбор 6
+```sql
+CREATE INDEX idx_orders_user_status ON orders(user_id, status);
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE user_id = 1 AND status = 'new';
+-- SEARCH orders USING INDEX idx_orders_user_status
+DROP INDEX idx_orders_user_status;
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE user_id = 1 AND status = 'new';
+-- SCAN orders
+```
+Составной индекс ускоряет фильтры по обеим колонкам; без него — полное сканирование.
+### Разбор 7
+```sql
+CREATE TRIGGER inc_orders AFTER INSERT ON orders
+BEGIN
+    UPDATE users SET orders_count = orders_count + 1
+    WHERE id = NEW.user_id;
+END;
+```
+После INSERT заказа счётчик обновляет автоматически. Денормализация — осознанный компромисс ради скорости чтения.
+
 <!--/SOLUTION-->
 
 <!--QUIZ-->
@@ -464,4 +501,37 @@ SEARCH orders USING INDEX idx_orders_user_status (user_id=? AND status=?)
 - Отсутствие транзитивных зависимостей
 * Правильный ответ: Атомарные значения в ячейках и наличие первичного ключа
 Хранение списка через запятую в одной ячейке нарушает 1НФ.
+Что такое составной индекс?
+- Индекс по нескольким колонкам
+- Индекс на одну колонку
+- Уникальный индекс
+- Первичный ключ
+* Правильный ответ: Индекс по нескольким колонкам
+Порядок колонок важен для запросов.
+
+Что покажет EXPLAIN QUERY PLAN?
+- Как СУБД собирается выполнять запрос
+- Данные
+- Ошибки
+- Индексы
+* Правильный ответ: Как СУБД собирается выполнять запрос
+SEARCH ... USING INDEX означает использование индекса.
+
+Что такое триггер?
+- Код, выполняющийся автоматически при событии (INSERT/UPDATE/DELETE)
+- Представление
+- Хранимая функция
+- Индекс
+* Правильный ответ: Код, выполняющийся автоматически при событии
+Триггер выполняет действия после/до изменения.
+
+Когда полезна денормализация?
+- При частом чтении агрегатов и редкой записи
+- Всегда
+- Никогда
+- Только в тестах
+* Правильный ответ: При частом чтении агрегатов и редкой записи
+Жертвуем консистентностью записи ради скорости чтения.
+
+# 
 <!--/QUIZ-->
