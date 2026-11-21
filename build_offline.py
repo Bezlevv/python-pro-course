@@ -54,7 +54,9 @@ def build_lesson_html(lesson):
         '<button class="nav-btn" onclick="navLesson(-1)">← Предыдущий</button>',
         '<button class="nav-btn" onclick="navLesson(1)">Следующий →</button>',
         '</div></div>',
+        '<textarea class="note-area" id="noteArea" placeholder="📝 Моя заметка к уроку (сохраняется автоматически)"></textarea>',
         f'<h2>{escape(lesson.title)}</h2>',
+
         '<div class="meta"><span>' + escape(lesson.module.title) + '</span> · <span>'
         + escape(lesson.get_difficulty_display()) + '</span> · <span>'
         + escape(lesson.duration) + '</span></div>',
@@ -170,6 +172,10 @@ body{margin:0;font-family:Inter,"Segoe UI",system-ui,sans-serif;background:var(-
 .quiz-question.correct .quiz-text{color:#34d399;}
 .quiz-question.incorrect .quiz-text{color:#f87171;}
 #progressLine{font-size:13px;color:var(--muted);margin-bottom:12px;}
+.copy-btn{position:absolute;top:8px;right:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:11px;padding:3px 10px;border-radius:6px;cursor:pointer;font-family:inherit;}
+.theory pre{position:relative;}
+.note-area{width:100%;min-height:64px;margin:10px 0;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px;font:inherit;resize:vertical;}
+
 """
 
 JS = """
@@ -356,6 +362,62 @@ function checkQuiz(btn){
   block.querySelector('.quiz-score').textContent = 'Результат: ' + score + ' из ' + total;
 }
 
+
+function decoratePreBlocks(){
+  document.querySelectorAll('.theory pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-btn';
+    btn.textContent = 'Копировать';
+    btn.onclick = () => {
+      const code = pre.querySelector('code');
+      const txt = code ? code.innerText : pre.innerText;
+      navigator.clipboard.writeText(txt).then(() => {
+        btn.textContent = '✓ Скопировано';
+        setTimeout(() => btn.textContent = 'Копировать', 1500);
+      });
+    };
+    pre.appendChild(btn);
+  });
+}
+
+function notes() { return JSON.parse(localStorage.getItem('pp_notes') || '{}'); }
+function initNotes(){
+  const ta = document.getElementById('noteArea');
+  if (!ta || activeId == null) return;
+  ta.value = notes()[activeId] || '';
+  ta.oninput = () => {
+    const n = notes();
+    n[activeId] = ta.value;
+    localStorage.setItem('pp_notes', JSON.stringify(n));
+  };
+}
+
+function exportProgress(){
+  const data = {
+    exported: new Date().toISOString(),
+    done: doneIds(),
+    fav: favIds(),
+    notes: notes(),
+    lastLesson: localStorage.getItem('pp_last') || null,
+    theme: localStorage.getItem('pp_theme') || 'dark'
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'pythonpro-progress.json';
+  a.click();
+}
+
+// в openLesson добавляем decoratePreBlocks + initNotes
+const originalOpen = openLesson;
+openLesson = function(id){
+  originalOpen(id);
+  decoratePreBlocks();
+  initNotes();
+};
+
 applyTheme();
 const last = localStorage.getItem('pp_last');
 if (last && lessons[last]) openLesson(Number(last));
@@ -375,7 +437,7 @@ TEMPLATE = """<!DOCTYPE html>
 <body data-theme="dark">
 <div id="layout">
   <div id="sidebar">
-    <div class="brand">🐍 Python<span>Про</span><button class="nav-btn" onclick="toggleTheme()" title="Тема">🌙</button></div>
+    <div class="brand">🐍 Python<span>Про</span><button class="nav-btn" onclick="toggleTheme()" title="Тема">🌙</button><button class="nav-btn" onclick="exportProgress()" title="Экспорт прогресса">⬇</button></div>
     <div id="progressLine">Прогресс: 0%</div>
     @@SIDEBAR@@
   </div>
